@@ -32,3 +32,7 @@
 *.app
 
 /objs
+
+#Inputs and outputs
+*.csv
+*.bin
