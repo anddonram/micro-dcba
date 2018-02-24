@@ -60,7 +60,7 @@ int main (int argc, char* argv[]) {
 	bool random_system=true;
 	int outputtype=0;
 	string input_file="small.bin";
-
+	string filter_file="";
 	/* Default */
 	options->num_rule_blocks = 384;
 	options->num_blocks_env = 128;
@@ -77,9 +77,10 @@ int main (int argc, char* argv[]) {
 	options->accuracy=2;
 	options->verbose=0;
 	options->debug = false;
-	
+	options->output_filter=NULL;
+
 	// TODO: use getopt_long function to support arguments of type "--blocks"
-	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h")) != -1) {
+	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:")) != -1) {
 		switch (c) {
 		/* For randomly generated system */
 		case 'R':
@@ -127,6 +128,10 @@ int main (int argc, char* argv[]) {
 			random_system=false;
 			input_file = optarg;
 			break;
+		case 'w':
+			filter_file = optarg;
+
+			break;
 		case 'O':
 			outputtype=atoi(optarg);
 			break;
@@ -154,6 +159,7 @@ int main (int argc, char* argv[]) {
 			cout << "Usage: ./abcd <options>" <<endl<<
 				        "Options for the simulation:"<<endl<<
 					" -f: input file in binary format (revision 16-09-2014 supported)" << endl <<
+					" -w: filter output file" << endl <<
 					" -s: number of simulations"<< endl <<
 					" -a: accuracy in the algorithms" << endl <<
 					" -t: time steps" << endl <<
@@ -207,7 +213,7 @@ int main (int argc, char* argv[]) {
 	
 	/* Read the input */	
 	if (!random_system) {
-	    source=new PDP_Psystem_source_binary(input_file.c_str(),options);
+	    source=new PDP_Psystem_source_binary(input_file.c_str(),options,filter_file);
 	}
 	else {
 		// Never output in a random system
@@ -308,7 +314,7 @@ int main (int argc, char* argv[]) {
 	
 
 	delete source;
-	
+
 	start_timer();
 	
 	/* Run the main loop of the simulator */

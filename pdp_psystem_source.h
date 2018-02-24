@@ -55,6 +55,8 @@ struct _options{
 	int verbose;
 	unsigned long int mem;
 	int debug;
+
+	unsigned int* output_filter;
 };
 
 typedef struct _options * Options;

@@ -37,7 +37,7 @@
 class PDP_Psystem_source_binary: public PDP_Psystem_source {
     
 public:
-	PDP_Psystem_source_binary(const char* filename, Options options);
+	PDP_Psystem_source_binary(const char* filename, Options options,string filter_file);
 	PDP_Psystem_source_binary(Options options);
 	~PDP_Psystem_source_binary();
 	void write_test_binary();
@@ -45,7 +45,8 @@ public:
 private:
 	/* File */
 	ifstream is;
-	
+	//For filtering
+	string filter_filename;
 	/* Sizes */
 	unsigned int number_objects;
 	unsigned int number_environments;
@@ -127,7 +128,10 @@ private:
 	bool read_inf_2();
 	bool read_inf_3();
 	bool read_multisets();
-	
+	bool read_filter();
+	/*Returns the index of the object in the array if it is valid, otherwise returns -1
+	The object is invalid if the value for each parameter is out of bounds*/
+	int checkObject(int env,int mem,int obj);
 	/* Class for errors and exceptions concerning the file */
 	class FileException {
 	    private:

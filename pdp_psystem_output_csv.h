@@ -58,7 +58,7 @@ public:
 		outfile.close();
 	}
 
-	bool write_configuration(unsigned int* config_multisets,char * config_charges, int sim, int step, char** objstrings=NULL);
+	bool write_configuration(unsigned int* config_multisets,char * config_charges, int sim, int step, char** objstrings=NULL,unsigned int* output_filter=NULL);
 };
 
 

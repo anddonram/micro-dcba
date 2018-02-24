@@ -70,12 +70,13 @@ PDP_Psystem_output_csv::PDP_Psystem_output_csv(const char * file,Options opt) {
 }
 
 
-bool PDP_Psystem_output_csv::write_configuration(unsigned int* config_multisets, char * config_charges, int sim, int step, char** objstrings) {
+bool PDP_Psystem_output_csv::write_configuration(unsigned int* config_multisets, char * config_charges, int sim, int step, char** objstrings,unsigned int* output_filter) {
 
 	if (config_multisets==NULL || config_charges==NULL) return false;
 	if (donotoutput) return true;
 
 	bool useobjstring = objstrings != NULL;
+	bool usefilter=output_filter!=NULL;
 
 	int esize=options->num_objects*options->num_membranes;
 	int msize=options->num_objects;
@@ -84,6 +85,11 @@ bool PDP_Psystem_output_csv::write_configuration(unsigned int* config_multisets,
 	for (int e=0;e<options->num_environments;e++) {
 		for (int m=0;m<options->num_membranes;m++) {
 			for (unsigned int o=0; o<options->num_objects;o++) {
+
+				//CPU per object filtering
+				if(usefilter && output_filter[e*esize+m*msize+o]==0)
+					continue;
+
 				unsigned int multip=config_multisets[MU_IDX(o,m)];
 				if (multip>0) {
 					outfile << sim << ","

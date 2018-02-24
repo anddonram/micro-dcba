@@ -138,7 +138,6 @@ bool Simulator_gpu_dir::step(int k){
 
 		/* MAIN LOOP */
 		for (uint i=0; i<k; i++) {
-                        
             pdp_out->print_step(i);
 
 			if (selection())
@@ -152,7 +151,7 @@ bool Simulator_gpu_dir::step(int k){
             if ((i+1)%options->cycles==0) {
             	retrieve(psb);
             	for (uint simu=psb; (simu <psb+sim_parallel) && (simu < options->num_simulations); simu++)
-            		PDPout->write_configuration(structures->configuration.multiset,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects);
+            		PDPout->write_configuration(structures->configuration.multiset,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects,options->output_filter);
             }
 		}
 	}

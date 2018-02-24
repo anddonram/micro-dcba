@@ -74,7 +74,7 @@ public:
 		if (multip4) delete [] multip4;
 	}
 
-	bool write_configuration(unsigned int* config_multisets,char * config_charges, int sim, int step, char** objstrings=NULL);
+	bool write_configuration(unsigned int* config_multisets,char * config_charges, int sim, int step, char** objstrings=NULL,unsigned int* output_filter=NULL);
 };
 
 

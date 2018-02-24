@@ -74,10 +74,12 @@ PDP_Psystem_output_binary::PDP_Psystem_output_binary(const char * file,Options o
 }
 
 
-bool PDP_Psystem_output_binary::write_configuration(unsigned int* config_multisets, char * config_charges, int sim, int step, char** objstrings) {
+bool PDP_Psystem_output_binary::write_configuration(unsigned int* config_multisets, char * config_charges, int sim, int step, char** objstrings,unsigned int* output_filter) {
 
 	if (config_multisets==NULL || config_charges==NULL) return false;
 	if (donotoutput) return true;
+
+	bool usefilter=output_filter!=NULL;
 
 	int esize=options->num_objects*options->num_membranes;
 	int msize=options->num_objects;
@@ -93,6 +95,13 @@ bool PDP_Psystem_output_binary::write_configuration(unsigned int* config_multise
 		for (int m=0;m<options->num_membranes;m++) {
 			int maxprec=0;
 			unsigned int next=0;
+
+			//TODO: Check if this code, copied from PDP_Psystem_output_csv, actually works
+			//for binary output
+			//CPU per object filtering
+			//if(usefilter && output_filter[e*esize+m*msize+o]==0)
+			//	continue;
+			//ENDTODO
 
 			for (unsigned int o=0; o<options->num_objects;o++) {
 				unsigned int multip=config_multisets[MU_IDX(o,m)];

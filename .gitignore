@@ -2,6 +2,7 @@
 *.d
 
 # Compiled Object files
+/objs
 *.slo
 *.lo
 *.o
@@ -31,8 +32,13 @@
 *.out
 *.app
 
-/objs
 
 #Inputs and outputs
 *.csv
 *.bin
+*.txt
+#Project specific
+.cproject
+.project
+
+abcdgpu
