@@ -44,9 +44,9 @@ Type ./abcdgpu -h to list the different options. In this version, input files of
 * A random PDP system (OpenMP) parallel simulation using 4 CPU cores: export OMP_NUM_THREADS=4; ./abcdgpu -X 2
 * A random PDP system (CUDA) parallel simulation: ./abcdgpu -X 2 -I 1
 * A random PDP system profiling execution (CPU vs GPU): ./abcdgpu -X 2 -I 1 -M 1
-* A profiling execution (CPU vs GPU) for a random PDP system with 100000 rule blocks, 1000 objects in the alphabet, q degree of 4, maximum of 5 rules per block, and maximum of 3 objects in LHS membranes using 100 simulations, 20 environments (m degree) and 1 step: ./abcd -I 1 -M 1 -R -b 100000 -o 1000 -q 4 -r 5 -l 3 -s 100 -e 20 -t 1
+* A profiling execution (CPU vs GPU) for a random PDP system with 100000 rule blocks, 1000 objects in the alphabet, q degree of 4, maximum of 5 rules per block, and maximum of 3 objects in LHS membranes using 100 simulations, 20 environments (m degree) and 1 step: ./abcdgpu -I 1 -M 1 -R -b 100000 -o 1000 -q 4 -r 5 -l 3 -s 100 -e 20 -t 1
 * A profiling execution (CPU vs GPU) for the Bearded Vulture model (in plingua folder, previously generated from the .pli file), using 1000 simulations, 42 steps, 3 steps per cycle, verbosity 1: ./abcdgpu -f plingua/bv_model_bwmc12.bin -s 1000 -t 42 -I 1 -M 1 -v 1 -c 3
-* A simulation of the Bearded Vulture model on the GPU using 100 simulations, 42 steps, 3 steps per cycle, verbosity 1, and the output of a csv (which will be named after the input file plus the extension of .csv): ./abcdgpu -f plingua/bv_bwmc12.bin -I 1 -s 100 -t 42 -v 1 -c 3 -O 0
+* A simulation of the Bearded Vulture model on the GPU using 100 simulations, 42 steps, 3 steps per cycle, verbosity 1, and the output of a csv (which will be named after the input file plus the extension of .csv): ./abcdgpu -f plingua/bv_model_bwmc12.bin -I 1 -s 100 -t 42 -v 1 -c 3 -O 0
 
 
 
