@@ -63,7 +63,7 @@
 #include <curand_kernel.h>
 #include <iostream>
 
-using namespace std;
+//using namespace std;
 
 //Comment to generalize:
 #define __IDX ((blockIdx.y * gridDim.x + blockIdx.x) * blockDim.x + threadIdx.x);

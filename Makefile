@@ -60,7 +60,7 @@
 CUDA_PATH:= /usr/local/cuda-9.1
 
 # GNU g++ compiler is required
-GCC := g++
+GCC := g++ -std=c++11 
 	
 # NVIDIA nvcc compiler is required
 NVCC := nvcc -ccbin $(GCC)

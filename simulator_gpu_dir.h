@@ -103,6 +103,7 @@ private:
 	/* Auxiliary data structures */
 	/*****************************/
 	PDP_Psystem_REDIX::Structures structures, d_structures;
+	PDP_Psystem_REDIX::Configuration d_configuration;
 	Options options;
 
 	MULTIPLICITY *d_nb;
@@ -125,6 +126,7 @@ private:
 	int sim_parallel;
 	cudaDeviceProp dev_property;
 
+	cudaStream_t execution_stream, copy_stream;
 	/*******************************/
 	PDP_Psystem_output * PDPout;
 	bool will_out;
@@ -144,8 +146,15 @@ private:
 	bool init();
 	void del();
 	void reset(int sim_ini);
+	//Sync retrieval of data
 	void retrieve(int sim_ini);
 
+	//Async retrieval of data: first copy to aux configuration, then retrieve async
+	void retrieve_copy();
+	void retrieve_async(int sim_ini);
+
+	void write_async(int psb,int i);
+	void do_nothing();
 	/* Micro phases executed on GPU */
 	bool selection_phase1();
 	bool selection_phase2();

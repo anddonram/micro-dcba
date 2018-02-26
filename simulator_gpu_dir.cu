@@ -47,6 +47,7 @@
 #include <iostream>
 #include <timestat.h>
 #include <cstdlib>
+#include <future>
 using namespace std;
 
 #define CU_THREADS 256
@@ -133,10 +134,14 @@ bool Simulator_gpu_dir::step(int k){
 		
 		reset(psb);
 
-        pdp_out->print_sim_range(psb,psb+options->num_parallel_simulations);
+		pdp_out->print_sim_range(psb,psb+options->num_parallel_simulations);
 
+		auto handle = std::async(std::launch::async,
+						&Simulator_gpu_dir::do_nothing,this);
 
-		/* MAIN LOOP */
+        //std::thread write_config(&Simulator_gpu_dir::do_nothing,this);
+
+        /* MAIN LOOP */
 		for (uint i=0; i<k; i++) {
             pdp_out->print_step(i);
 
@@ -149,11 +154,32 @@ bool Simulator_gpu_dir::step(int k){
             pdp_out->print_configuration();
 
             if ((i+1)%options->cycles==0) {
-            	retrieve(psb);
-            	for (uint simu=psb; (simu <psb+sim_parallel) && (simu < options->num_simulations); simu++)
-            		PDPout->write_configuration(structures->configuration.multiset,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects,options->output_filter);
+
+            	//Wait for possible previous copy to end
+            	cudaStreamSynchronize(copy_stream);
+            	retrieve_copy();
+            	cudaStreamSynchronize(execution_stream);
+
+
+            	handle.wait();
+            	// Makes the main thread wait for the new thread to finish execution, therefore blocks its own execution.
+            	//write_config.join();
+
+            	retrieve_async(psb);
+            	cout << "Async copy requested. Async writing..." << endl;
+            	handle = std::async(std::launch::async,
+            			&Simulator_gpu_dir::write_async,this,psb,i);
+
+            	// Constructs the new thread and runs it. Does not block execution.
+                //std::thread write_config(&Simulator_gpu_dir::write_async,this,psb,i);
+
+            	//for (uint simu=psb; (simu <psb+sim_parallel) && (simu < options->num_simulations); simu++)
+            	//	PDPout->write_configuration(structures->configuration.multiset,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects,options->output_filter);
             }
+
 		}
+        //Last join for
+    	//write_config.join();
 	}
 
     /* Output profiling information */
@@ -161,7 +187,23 @@ bool Simulator_gpu_dir::step(int k){
 	
 	return true;
 }
+// The function we want to execute on the new thread.
+void Simulator_gpu_dir::write_async(int psb,int i)
+{
+	cout << "Waiting for copy..." << endl;
+	cudaStreamSynchronize(copy_stream);
 
+	cout << "Writing..." << endl;
+	for (uint simu=psb; (simu <psb+sim_parallel) && (simu < options->num_simulations); simu++)
+	    PDPout->write_configuration(structures->configuration.multiset,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects,options->output_filter);
+
+	cout << "Finished writing. Next..." << endl;
+}
+// Aux function, does nothing
+void Simulator_gpu_dir::do_nothing()
+{
+	cout << "Doing nothing" << endl;
+}
 
 /***************************************************************************/
 /***************************************/
@@ -192,6 +234,8 @@ bool safe_u_mul(uint& op1, uint op2) {
 //TODO: Make this member to return a boolean value, to check errors
 bool Simulator_gpu_dir::init() {
 
+	checkCudaErrors(cudaStreamCreate (&execution_stream));
+	checkCudaErrors(cudaStreamCreate (&copy_stream));
 	/* Set auxiliary sizes info */
 	esize=options->num_objects*options->num_membranes;
 	msize=options->num_objects;
@@ -260,10 +304,10 @@ bool Simulator_gpu_dir::init() {
 	ini_cfg = structures->configuration;
 
 	structures->configuration.membrane_size=options->num_membranes*options->num_environments*options->num_simulations;
-	structures->configuration.membrane = new CHARGE[structures->configuration.membrane_size];
+	checkCudaErrors(cudaMallocHost((void**)&structures->configuration.membrane,structures->configuration.membrane_size*sizeof(CHARGE)));
 
 	structures->configuration.multiset_size = options->num_objects*options->num_membranes*options->num_environments*options->num_simulations;
-	structures->configuration.multiset = new MULTIPLICITY[structures->configuration.multiset_size];
+	checkCudaErrors(cudaMallocHost((void**)&structures->configuration.multiset, structures->configuration.multiset_size*sizeof( MULTIPLICITY)));
 
 	/* Init configurations */
 	for (int sim=0; sim<options->num_simulations; sim++) {
@@ -473,6 +517,10 @@ bool Simulator_gpu_dir::init() {
 	checkCudaErrors(cudaMalloc((void**)&(d_structures->configuration.multiset), d_structures->configuration.multiset_size*sizeof(MULTIPLICITY)));
 	checkCudaErrors(cudaMalloc((void**)&(d_structures->configuration.membrane), d_structures->configuration.membrane_size*sizeof(CHARGE)));
 
+	//Allocate Aux Configuration for async copy
+	checkCudaErrors(cudaMalloc((void**)&(d_configuration.multiset), d_structures->configuration.multiset_size*sizeof(MULTIPLICITY)));
+	checkCudaErrors(cudaMalloc((void**)&(d_configuration.membrane), d_structures->configuration.membrane_size*sizeof(CHARGE)));
+
 	// Allocate Additions
 	if (!accurate)
 		checkCudaErrors(cudaMalloc((void**)&d_addition,addition_size*sizeof(float)));
@@ -536,8 +584,9 @@ void Simulator_gpu_dir::del() {
 	PDP_Psystem_REDIX::Configuration aux;
 	aux=structures->configuration;
 	structures->configuration=ini_cfg;
-	delete []aux.membrane;
-	delete []aux.multiset;
+	checkCudaErrors(cudaFreeHost(aux.membrane));
+	checkCudaErrors(cudaFreeHost(aux.multiset));
+
 	if (structures->nb) delete []structures->nb;
 	if (structures->nr) delete []structures->nr;
 	if (abv) delete []abv;
@@ -573,6 +622,10 @@ void Simulator_gpu_dir::del() {
 	checkCudaErrors(cudaFree(d_structures->configuration.multiset));
 	checkCudaErrors(cudaFree(d_structures->configuration.membrane));
 
+	checkCudaErrors(cudaFree(d_configuration.multiset));
+	checkCudaErrors(cudaFree(d_configuration.membrane));
+
+
 	// Deallocate Additions
 	if (!accurate) checkCudaErrors(cudaFree(d_addition));
 	else {
@@ -587,6 +640,8 @@ void Simulator_gpu_dir::del() {
 	// Deallocate Errors
 	checkCudaErrors(cudaFree(d_data_error));
 	
+	checkCudaErrors(cudaStreamDestroy(execution_stream));
+	checkCudaErrors(cudaStreamDestroy(copy_stream));
 	// Deallocate RNG states
 	curng_binomial_free();	
 
@@ -600,6 +655,16 @@ void Simulator_gpu_dir::reset(int sim_ini) {
 	checkCudaErrors(cudaMemcpy(d_structures->configuration.multiset, structures->configuration.multiset+sim_ini*options->num_environments*esize, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyHostToDevice));
 }
 
+
+void Simulator_gpu_dir::retrieve_copy() {
+	checkCudaErrors(cudaMemcpyAsync(d_configuration.membrane, d_structures->configuration.membrane, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyDeviceToDevice,execution_stream));
+	checkCudaErrors(cudaMemcpyAsync(d_configuration.multiset, d_structures->configuration.multiset, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyDeviceToDevice,execution_stream));
+}
+void Simulator_gpu_dir::retrieve_async(int sim_ini) {
+	checkCudaErrors(cudaMemcpyAsync(structures->configuration.membrane+sim_ini*options->num_environments*options->num_membranes, d_configuration.membrane, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyDeviceToHost,copy_stream));
+	checkCudaErrors(cudaMemcpyAsync(structures->configuration.multiset+sim_ini*options->num_environments*esize, d_configuration.multiset, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,copy_stream));
+}
+//Deprecated
 void Simulator_gpu_dir::retrieve(int sim_ini) {
 
 	checkCudaErrors(cudaMemcpy(structures->configuration.membrane+sim_ini*options->num_environments*options->num_membranes, d_structures->configuration.membrane, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyDeviceToHost));
@@ -1144,20 +1209,23 @@ bool Simulator_gpu_dir::selection_phase1() {
 		sdkStartTimer(&counters.timer);
 	}
 
-	kernel_phase1_filters <<<dimGrid,dimBlock,sh_mem>>> (d_structures->ruleblock,
+	kernel_phase1_filters <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nb, *options,
 			d_abv, d_data_error);
 	
 	getLastCudaError("kernel for phase 1 (filters) launch failure");	
 	//cutilDeviceSynchronize();	
-	cudaDeviceSynchronize(); // Compatible for CUDA < 4.0
+	cudaStreamSynchronize(execution_stream);
+
 	if (runcomp) {
 		sdkStopTimer(&counters.timer);
 		counters.timek1gpu=sdkGetTimerValue(&counters.timer);
 		pdp_out->print_profiling_dcba_microphase_result(counters.timek1gpu);
 	}
 	
-	checkCudaErrors(cudaMemcpy(data_error, d_data_error, data_error_size*sizeof(uint), cudaMemcpyDeviceToHost));
+	//TODO: stop this from pausing all stream while other data is being async copied
+	//specially data that is being output
+	checkCudaErrors(cudaMemcpyAsync(data_error, d_data_error, data_error_size*sizeof(uint), cudaMemcpyDeviceToHost,execution_stream));
 	
 	/* Checking mutual consistency */
 	pdp_out->print_profiling_dcba_microphase_name("Checking mutual consistency");
@@ -1165,7 +1233,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 	if (data_error[0]==CONSISTENCY_ERROR) {
 		pdp_out->print_profiling_dcba_microphase_result(false);
 
-		checkCudaErrors(cudaMemcpy(this->abv, this->d_abv, this->abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpyAsync(this->abv, this->d_abv, this->abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost,execution_stream));
 
 		cout << "Found inconsistent blocks:" << endl;
 		for (unsigned int sim=0; sim < options->num_parallel_simulations; sim++)
@@ -1208,18 +1276,18 @@ bool Simulator_gpu_dir::selection_phase1() {
 		}
 
 		if (! accurate)
-		kernel_phase1_normalization <<<dimGrid,dimBlock,sh_mem>>> (d_structures->ruleblock,
+		kernel_phase1_normalization <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nr,
 			*options,d_addition,d_abv,obj_chunks);
 		else
-		kernel_phase1_normalization_acu <<<dimGrid,dimBlock,sh_mem>>> (d_structures->ruleblock,
+		kernel_phase1_normalization_acu <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nr,
 			*options,d_denominator,d_numerator,d_ini_numerator,d_abv,obj_chunks);
 	
 	
 		getLastCudaError("kernel for phase 1 (normalization) launch failure");
 		//cutilDeviceSynchronize();	
-		cudaDeviceSynchronize(); // Compatible for CUDA < 4.0
+    	cudaStreamSynchronize(execution_stream);
 			
 		if (runcomp) {
 			sdkStopTimer(&counters.timer);
@@ -1235,13 +1303,14 @@ bool Simulator_gpu_dir::selection_phase1() {
 			sdkStartTimer(&counters.timer);
 		}
 
-		kernel_phase1_update <<<dimGrid,dimBlock,sh_mem>>> (d_structures->ruleblock,
+		kernel_phase1_update <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nb,
 			d_structures->nr, *options, d_abv, d_data_error);
 	
 		getLastCudaError("kernel for phase 1 (update) launch failure");
 		//cutilDeviceSynchronize();	
-		cudaDeviceSynchronize(); // Compatible for CUDA < 4.0
+    	cudaStreamSynchronize(execution_stream);
+
 		
 		if (runcomp) {
 			sdkStopTimer(&counters.timer);
@@ -1387,7 +1456,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 	
 		/* Checking ABV */
 		ABV_T *debug_abv= new ABV_T[abv_size];
-		checkCudaErrors(cudaMemcpy(debug_abv, d_abv, abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpyAsync(debug_abv, d_abv, abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost,execution_stream));
 
 		int count_errors=0;
 		for (unsigned int sim=0; sim < options->num_parallel_simulations; sim++) {
@@ -1412,7 +1481,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 		
 		//d_nb=new uint[d_structures->nb_size];
 		/* CALCULATING DIFFERENCES */
-		checkCudaErrors(cudaMemcpy(d_nb, d_structures->nb, d_structures->nb_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpyAsync(d_nb, d_structures->nb, d_structures->nb_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,execution_stream));
 		int diff=0;
 		int s_diff=0;
 		int g_diff=0;
@@ -1803,13 +1872,14 @@ bool Simulator_gpu_dir::selection_phase2(){
 		dim3 dimBlock (cu_threads+1);
 		size_t sh_mem=((cu_threads>>ABV_LOG_WORD_SIZE) + 2*cu_threads)*sizeof(uint);
 	
-		kernel_phase2_generic <<<dimGrid,dimBlock,sh_mem>>> (d_structures->ruleblock,
+		kernel_phase2_generic <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nb, 
 			d_structures->nr, *options, d_abv);
 	
 		getLastCudaError("kernel for phase 2 launch failure");
 		//cutilDeviceSynchronize();	
-		cudaDeviceSynchronize(); // Compatible for CUDA < 4.0
+    	cudaStreamSynchronize(execution_stream);
+
 	}
 	else if (mode<2) {
 		if (pdp_out->will_print_dcba_phase())
@@ -1819,13 +1889,14 @@ bool Simulator_gpu_dir::selection_phase2(){
 		dim3 dimBlock (cu_threads);
 		size_t sh_mem=((cu_threads>>ABV_LOG_WORD_SIZE) + 2*cu_threads + options->max_lhs*cu_threads)*sizeof(uint);
 	
-		kernel_phase2_blhs <<<dimGrid,dimBlock,sh_mem>>> (d_structures->ruleblock,
+		kernel_phase2_blhs <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nb, 
 			d_structures->nr, *options, d_abv);
 	
 		getLastCudaError("kernel for phase 2 launch failure");
 		//cutilDeviceSynchronize();	
-		cudaDeviceSynchronize(); // Compatible for CUDA < 4.0
+    	cudaStreamSynchronize(execution_stream);
+
 	}
 	
 	if (runcomp) {
@@ -1853,15 +1924,15 @@ bool Simulator_gpu_dir::selection_phase2(){
 		pdp_out->print_profiling_dcba_microphase_name("Checking maximality");
 		ABV_T *debug_abv= new ABV_T[abv_size];
 		
-		checkCudaErrors(cudaMemcpy(debug_abv, d_abv, abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpyAsync(debug_abv, d_abv, abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost,execution_stream));
 
 		d_cfg.multiset = new MULTIPLICITY[structures->configuration.multiset_size];
 				
-		checkCudaErrors(cudaMemcpy(d_cfg.multiset, d_structures->configuration.multiset, d_structures->configuration.multiset_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpyAsync(d_cfg.multiset, d_structures->configuration.multiset, d_structures->configuration.multiset_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,execution_stream));
 
 		//checkCudaErrors(cudaMemcpy(structures->nr, d_structures->nr, d_structures->nr_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost));
 
-		checkCudaErrors(cudaMemcpy(d_nb, d_structures->nb, d_structures->nb_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost));
+		checkCudaErrors(cudaMemcpyAsync(d_nb, d_structures->nb, d_structures->nb_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,execution_stream));
 		
 //		print_block_applications(d_nb);
 //
@@ -2096,13 +2167,14 @@ bool Simulator_gpu_dir::selection_phase3() {
 	dim3 dimGrid (cu_blocksx, cu_blocksy);
 	dim3 dimBlock (cu_threads);
 
-	kernel_phase3 <<<dimGrid,dimBlock>>> (d_structures->ruleblock,
+	kernel_phase3 <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
 		d_structures->configuration, d_structures->nb, 
 		d_structures->nr, d_structures->probability, d_structures->pi_rule_size,
 		d_structures->pi_rule_size+d_structures->env_rule_size, *options);
 	 
 	getLastCudaError("kernel for phase 3 launch failure");	
-	cudaDeviceSynchronize(); // Compatible for CUDA < 4.0
+	cudaStreamSynchronize(execution_stream);
+
 
 	if (runcomp) {
 		sdkStopTimer(&counters.timer);
@@ -2305,7 +2377,7 @@ int Simulator_gpu_dir::execution() {
 	dim3 dimGrid (cu_blocksx, cu_blocksy);
 	dim3 dimBlock (cu_threads);
 
-	kernel_phase4 <<<dimGrid,dimBlock>>> (d_structures->rule,
+	kernel_phase4 <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->rule,
 		d_structures->configuration, d_structures->rhs, 
 		d_structures->nr, d_structures->pi_rule_size,
 		d_structures->pi_rule_size+d_structures->env_rule_size,
@@ -2313,7 +2385,8 @@ int Simulator_gpu_dir::execution() {
 	 
 	getLastCudaError("kernel for phase 4 launch failure");
 	//cutilDeviceSynchronize();	
-	cudaDeviceSynchronize(); // Compatible for CUDA < 4.0
+	cudaStreamSynchronize(execution_stream);
+
 
 	if (runcomp) {
 		sdkStopTimer(&counters.timer);
