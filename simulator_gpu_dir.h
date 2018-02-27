@@ -130,7 +130,9 @@ private:
 	/*******************************/
 	PDP_Psystem_output * PDPout;
 	bool will_out;
-
+	unsigned int *d_output_filter;
+	MULTIPLICITY* output_multiset;
+	MULTIPLICITY* d_output_multiset;
 	/*******************************/
 	/* Only for debugging purposes */
 

@@ -57,6 +57,9 @@ struct _options{
 	int debug;
 
 	unsigned int* output_filter;
+	//Counts the number of objects that will be output, to allocate an array
+	unsigned int objects_to_output;
+	bool GPU_filter=false;
 };
 
 typedef struct _options * Options;

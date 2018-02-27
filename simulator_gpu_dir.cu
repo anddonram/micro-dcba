@@ -139,8 +139,6 @@ bool Simulator_gpu_dir::step(int k){
 		auto handle = std::async(std::launch::async,
 						&Simulator_gpu_dir::do_nothing,this);
 
-        //std::thread write_config(&Simulator_gpu_dir::do_nothing,this);
-
         /* MAIN LOOP */
 		for (uint i=0; i<k; i++) {
             pdp_out->print_step(i);
@@ -158,28 +156,21 @@ bool Simulator_gpu_dir::step(int k){
             	//Wait for possible previous copy to end
             	cudaStreamSynchronize(copy_stream);
             	retrieve_copy();
+            	//We must copy first
             	cudaStreamSynchronize(execution_stream);
 
-
+            	//Wait for previous write to copy to host
             	handle.wait();
-            	// Makes the main thread wait for the new thread to finish execution, therefore blocks its own execution.
-            	//write_config.join();
 
             	retrieve_async(psb);
-            	cout << "Async copy requested. Async writing..." << endl;
+
             	handle = std::async(std::launch::async,
             			&Simulator_gpu_dir::write_async,this,psb,i);
 
-            	// Constructs the new thread and runs it. Does not block execution.
-                //std::thread write_config(&Simulator_gpu_dir::write_async,this,psb,i);
-
-            	//for (uint simu=psb; (simu <psb+sim_parallel) && (simu < options->num_simulations); simu++)
-            	//	PDPout->write_configuration(structures->configuration.multiset,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects,options->output_filter);
             }
 
 		}
-        //Last join for
-    	//write_config.join();
+
 	}
 
     /* Output profiling information */
@@ -190,19 +181,31 @@ bool Simulator_gpu_dir::step(int k){
 // The function we want to execute on the new thread.
 void Simulator_gpu_dir::write_async(int psb,int i)
 {
-	cout << "Waiting for copy..." << endl;
+	unsigned int* output_multiset_pointer=structures->configuration.multiset;
+	//Wait until the copy to host has finished
 	cudaStreamSynchronize(copy_stream);
 
-	cout << "Writing..." << endl;
-	for (uint simu=psb; (simu <psb+sim_parallel) && (simu < options->num_simulations); simu++)
-	    PDPout->write_configuration(structures->configuration.multiset,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects,options->output_filter);
+	//cout << "Writing..." << endl;
 
-	cout << "Finished writing. Next..." << endl;
+	if(options->output_filter!=NULL){
+
+		if(options->GPU_filter){
+			output_multiset_pointer=output_multiset;
+		}
+
+		//Filtered configuration
+		for (uint simu=psb; (simu <psb+sim_parallel) && (simu < options->num_simulations); simu++)
+			PDPout->write_configuration_filtered(output_multiset_pointer,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects);
+
+	}else{
+		for (uint simu=psb; (simu <psb+sim_parallel) && (simu < options->num_simulations); simu++)
+			PDPout->write_configuration(output_multiset_pointer,structures->configuration.membrane,simu,i+1,structures->stringids.id_objects);
+	}
+	//cout << "Finished writing. Next..." << endl;
 }
 // Aux function, does nothing
 void Simulator_gpu_dir::do_nothing()
 {
-	cout << "Doing nothing" << endl;
 }
 
 /***************************************************************************/
@@ -521,6 +524,19 @@ bool Simulator_gpu_dir::init() {
 	checkCudaErrors(cudaMalloc((void**)&(d_configuration.multiset), d_structures->configuration.multiset_size*sizeof(MULTIPLICITY)));
 	checkCudaErrors(cudaMalloc((void**)&(d_configuration.membrane), d_structures->configuration.membrane_size*sizeof(CHARGE)));
 
+	//Allocate filter if any
+	if(options->output_filter!=NULL){
+		options->GPU_filter=true;
+		unsigned int filter_length=options->objects_to_output;
+		checkCudaErrors(cudaMalloc((void**)&d_output_filter,filter_length*sizeof(unsigned int)));
+		checkCudaErrors(cudaMemcpy(d_output_filter, options->output_filter,filter_length*sizeof(unsigned int), cudaMemcpyHostToDevice));
+
+		//Allocate compact multisets
+		checkCudaErrors(cudaMalloc((void**)&d_output_multiset,filter_length*sim_parallel*sizeof(MULTIPLICITY)));
+		checkCudaErrors(cudaMallocHost((void**)&output_multiset,filter_length*sim_parallel*sizeof(MULTIPLICITY)));
+	}
+
+
 	// Allocate Additions
 	if (!accurate)
 		checkCudaErrors(cudaMalloc((void**)&d_addition,addition_size*sizeof(float)));
@@ -626,6 +642,13 @@ void Simulator_gpu_dir::del() {
 	checkCudaErrors(cudaFree(d_configuration.membrane));
 
 
+	//Deallocate filter if any
+	if(options->output_filter!=NULL){
+		checkCudaErrors(cudaFree(d_output_filter));
+		checkCudaErrors(cudaFree(d_output_multiset));
+		checkCudaErrors(cudaFreeHost(output_multiset));
+	}
+
 	// Deallocate Additions
 	if (!accurate) checkCudaErrors(cudaFree(d_addition));
 	else {
@@ -655,12 +678,59 @@ void Simulator_gpu_dir::reset(int sim_ini) {
 	checkCudaErrors(cudaMemcpy(d_structures->configuration.multiset, structures->configuration.multiset+sim_ini*options->num_environments*esize, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyHostToDevice));
 }
 
+__global__ void kernel_output_filter(MULTIPLICITY* d_output_multiset,
+									MULTIPLICITY *src_multiset,
+									unsigned int *d_output_filter,
+									int max_objects,
+									int sim_size){
+	//Calculate id
+	uint tidx=threadIdx.x+blockIdx.x*blockDim.x;
+
+	//Only write if we are not out of bounds
+	if(tidx<max_objects){
+		//Thread tidx will write to position tidx
+		//The to be written at position tidx object_id is stored in d_output_filter
+		uint obj_id=d_output_filter[tidx];
+
+		//Get object from proper position taking offset into account
+		d_output_multiset[max_objects*blockIdx.y+tidx]=src_multiset[sim_size*blockIdx.y+obj_id];
+	}
+
+}
 
 void Simulator_gpu_dir::retrieve_copy() {
-	checkCudaErrors(cudaMemcpyAsync(d_configuration.membrane, d_structures->configuration.membrane, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyDeviceToDevice,execution_stream));
-	checkCudaErrors(cudaMemcpyAsync(d_configuration.multiset, d_structures->configuration.multiset, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyDeviceToDevice,execution_stream));
+	if(options->GPU_filter){
+		uint cu_threads=CU_THREADS;
+		uint cu_blocksx=options->objects_to_output/cu_threads;
+		if(cu_blocksx==0){
+			//Less objects than max threads per block
+			//use one block and one thread per block
+			cu_threads=options->objects_to_output;
+			cu_blocksx=1;
+		}else if(options->objects_to_output%cu_threads!=0){
+			//there are some objects that do not fill into a block
+			//Use extra block and keep track of position
+			cu_blocksx++;
+		}
+		uint cu_blocksy=options->num_parallel_simulations;
+
+		kernel_output_filter<<<dim3(cu_blocksx,cu_blocksy),
+									cu_threads,0,execution_stream>>>
+									(d_output_multiset,
+									d_configuration.multiset,
+									d_output_filter,
+									options->objects_to_output,
+									options->num_environments*esize);
+	}
+	getLastCudaError("Error copying filtered output device to device");
+
+	checkCudaErrors(cudaMemcpyAsync(d_configuration.membrane, d_structures->configuration.membrane,d_structures->configuration.membrane_size*sizeof(CHARGE), cudaMemcpyDeviceToDevice,execution_stream));
+	checkCudaErrors(cudaMemcpyAsync(d_configuration.multiset, d_structures->configuration.multiset,d_structures->configuration.multiset_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToDevice,execution_stream));
 }
 void Simulator_gpu_dir::retrieve_async(int sim_ini) {
+	if(options->GPU_filter){
+		checkCudaErrors(cudaMemcpyAsync(output_multiset, d_output_multiset, options->num_parallel_simulations*options->objects_to_output*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,copy_stream));
+	}
 	checkCudaErrors(cudaMemcpyAsync(structures->configuration.membrane+sim_ini*options->num_environments*options->num_membranes, d_configuration.membrane, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyDeviceToHost,copy_stream));
 	checkCudaErrors(cudaMemcpyAsync(structures->configuration.multiset+sim_ini*options->num_environments*esize, d_configuration.multiset, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,copy_stream));
 }

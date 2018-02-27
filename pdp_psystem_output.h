@@ -48,7 +48,8 @@ protected:
 	
 public:
 
-	virtual bool write_configuration(unsigned int* config_multisets, char * config_charges, int sim, int step, char** objstrings,unsigned int* output_filter=NULL)=0;
+	virtual bool write_configuration(unsigned int* config_multisets, char * config_charges, int sim, int step, char** objstrings)=0;
+	virtual bool write_configuration_filtered(unsigned int* filtered_multisets, char * config_charges, int sim, int step, char** objstrings)=0;
 };
 
 

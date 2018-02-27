@@ -129,6 +129,8 @@ PDP_Psystem_source_binary::~PDP_Psystem_source_binary() {
 	    delete [] ini_multiset;
 	}
 	if (ini_charge) delete []ini_charge;
+
+	if(options->output_filter!=NULL)delete []options->output_filter;
 }
 
 
@@ -643,6 +645,7 @@ bool PDP_Psystem_source_binary::read_filter() {
 	string line;
 	const char * line_start;
 	char * pEnd;
+
 	if (filter_filename==""){
 		//No filtering at all
 		return true;
@@ -655,6 +658,8 @@ bool PDP_Psystem_source_binary::read_filter() {
 	}else{
 		unsigned int filter_length=options->num_environments*options->num_membranes*options->num_objects;
 		options->output_filter=new unsigned int[filter_length];
+		options->objects_to_output=0;
+
 		//Set filter to 0
 		for(int i=0;i<filter_length;i++){
 			options->output_filter[i]=0;
@@ -686,21 +691,42 @@ bool PDP_Psystem_source_binary::read_filter() {
 			 }
 
 			 //Identify the index of the object and detect possible out of bounds
-			 int objectIndex=checkObject(env,mem,obj);
+			 int objectIndex=check_object(env,mem,obj);
 
 			 if(objectIndex==-1){
 				 //There was an error
-				// cout << "Detected invalid object (" << env << ", "<<mem<<", "<< obj << ")" << endl;
+				 cout << "Detected invalid object (" << env << ", "<<mem<<", "<< obj << ")" << endl;
 			 }else{
 				 //The object we want to save is correct, so we mark it
-				 options->output_filter[objectIndex]=1;
+
+				 //Say we have [0 1 1 0 0 1]
+				 //We will transform this into [1 2 5]
+				 //Besides, we can know the index where it will be written
+				 options->output_filter[options->objects_to_output]=objectIndex;
+
+				 options->objects_to_output++;
 			 }
 		 }
+
+		//Copy the first part of the array and free the rest
+		unsigned int* filter_indexes=new unsigned int [options->objects_to_output];
+		memcpy(filter_indexes,options->output_filter,options->objects_to_output*sizeof(unsigned int));
+		//Free that large chunk of memory
+		delete [] options->output_filter;
+
+		//And use the small one
+		options->output_filter=filter_indexes;
+
+//		for(int i=0;i<options->objects_to_output;i++){
+//			cout << "Detected object index " <<options->output_filter[i] << endl;
+//		}
+		cout << "Detected " << options->objects_to_output << " objects to be output" << endl;
+
 	}
     if (!fis.fail() && fis.good() && fis.is_open())
     	fis.close();
 }
-int PDP_Psystem_source_binary::checkObject(int env,int mem,int obj){
+int PDP_Psystem_source_binary::check_object(int env,int mem,int obj){
 	int objectIndex=-1;
 	if(env>=0 && env<options->num_environments
 			&& mem>=0 && mem<options->num_membranes

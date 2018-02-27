@@ -131,7 +131,7 @@ private:
 	bool read_filter();
 	/*Returns the index of the object in the array if it is valid, otherwise returns -1
 	The object is invalid if the value for each parameter is out of bounds*/
-	int checkObject(int env,int mem,int obj);
+	int check_object(int env,int mem,int obj);
 	/* Class for errors and exceptions concerning the file */
 	class FileException {
 	    private:
