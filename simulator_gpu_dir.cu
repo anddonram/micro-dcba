@@ -529,7 +529,7 @@ bool Simulator_gpu_dir::init() {
 		options->GPU_filter=true;
 		unsigned int filter_length=options->objects_to_output;
 		checkCudaErrors(cudaMalloc((void**)&d_output_filter,filter_length*sizeof(unsigned int)));
-		checkCudaErrors(cudaMemcpy(d_output_filter, options->output_filter,filter_length*sizeof(unsigned int), cudaMemcpyHostToDevice));
+		checkCudaErrors(cudaMemcpyAsync(d_output_filter, options->output_filter,filter_length*sizeof(unsigned int), cudaMemcpyHostToDevice,copy_stream));
 
 		//Allocate compact multisets
 		checkCudaErrors(cudaMalloc((void**)&d_output_multiset,filter_length*sim_parallel*sizeof(MULTIPLICITY)));
@@ -546,47 +546,58 @@ bool Simulator_gpu_dir::init() {
 		checkCudaErrors(cudaMalloc((void**)&d_numerator,addition_size*sizeof(uint)));
 	}
 
+
 	// Allocate ABV
 	checkCudaErrors(cudaMalloc((void**)&d_abv,abv_size*sizeof(ABV_T)));
-	checkCudaErrors(cudaMemset(d_abv,0xFF,abv_size*sizeof(ABV_T)));
+	checkCudaErrors(cudaMemsetAsync(d_abv,0xFF,abv_size*sizeof(ABV_T),copy_stream));
 	
 	// Allocate Errors
 	checkCudaErrors(cudaMalloc((void**)&d_data_error,data_error_size*sizeof(uint)));
-	checkCudaErrors(cudaMemset(d_data_error,0,data_error_size*sizeof(uint)));
-	
+	checkCudaErrors(cudaMemsetAsync(d_data_error,0,data_error_size*sizeof(uint),copy_stream));
+
 	// Allocate RNG states
-	curng_binomial_init(dim3(options->num_environments,options->num_parallel_simulations),CU_THREADS);
+	//Now the kernel is launched in a stream, so it can execute while the rest of structures are copied to memory
+	//We must cudaStreamSynchronize after all the memory
+	curng_binomial_init(dim3(options->num_environments,options->num_parallel_simulations),CU_THREADS,execution_stream);
+
+
 	
 	/* Copies */
+	//Now they are async with curng_init!!!
+
 	// Copy Ruleblock
-	checkCudaErrors(cudaMemcpy(d_structures->ruleblock.lhs_idx, structures->ruleblock.lhs_idx, (d_structures->ruleblock_size+1)*sizeof(LHS_IDX), cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpy(d_structures->ruleblock.rule_idx, structures->ruleblock.rule_idx, (d_structures->ruleblock_size+1)*sizeof(RULE_IDX), cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpy(d_structures->ruleblock.membrane, structures->ruleblock.membrane, d_structures->ruleblock_size*sizeof(MEMBRANE), cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->ruleblock.lhs_idx, structures->ruleblock.lhs_idx, (d_structures->ruleblock_size+1)*sizeof(LHS_IDX), cudaMemcpyHostToDevice,copy_stream));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->ruleblock.rule_idx, structures->ruleblock.rule_idx, (d_structures->ruleblock_size+1)*sizeof(RULE_IDX), cudaMemcpyHostToDevice,copy_stream));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->ruleblock.membrane, structures->ruleblock.membrane, d_structures->ruleblock_size*sizeof(MEMBRANE), cudaMemcpyHostToDevice,copy_stream));
 
 	// Copy LHS
-	checkCudaErrors(cudaMemcpy(d_structures->lhs.object, structures->lhs.object, d_structures->lhs_size*sizeof(OBJECT), cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpy(d_structures->lhs.mmultiplicity, structures->lhs.mmultiplicity, d_structures->lhs_size*sizeof(MULTIPLICITY), cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpy(d_structures->lhs.imultiplicity, structures->lhs.imultiplicity, d_structures->lhs_size*sizeof(INV_MULTIPLICITY), cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->lhs.object, structures->lhs.object, d_structures->lhs_size*sizeof(OBJECT), cudaMemcpyHostToDevice,copy_stream));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->lhs.mmultiplicity, structures->lhs.mmultiplicity, d_structures->lhs_size*sizeof(MULTIPLICITY), cudaMemcpyHostToDevice,copy_stream));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->lhs.imultiplicity, structures->lhs.imultiplicity, d_structures->lhs_size*sizeof(INV_MULTIPLICITY), cudaMemcpyHostToDevice,copy_stream));
 
 	// Copy RHS
-	checkCudaErrors(cudaMemcpy(d_structures->rhs.object, structures->rhs.object, d_structures->rhs_size*sizeof(OBJECT), cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpy(d_structures->rhs.mmultiplicity, structures->rhs.mmultiplicity, d_structures->rhs_size*sizeof(MULTIPLICITY), cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->rhs.object, structures->rhs.object, d_structures->rhs_size*sizeof(OBJECT), cudaMemcpyHostToDevice,copy_stream));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->rhs.mmultiplicity, structures->rhs.mmultiplicity, d_structures->rhs_size*sizeof(MULTIPLICITY), cudaMemcpyHostToDevice,copy_stream));
 
 	// Copy Rule
-	checkCudaErrors(cudaMemcpy(d_structures->rule.rhs_idx, structures->rule.rhs_idx, (d_structures->pi_rule_size+d_structures->env_rule_size+1)*sizeof(RHS_IDX), cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->rule.rhs_idx, structures->rule.rhs_idx, (d_structures->pi_rule_size+d_structures->env_rule_size+1)*sizeof(RHS_IDX), cudaMemcpyHostToDevice,copy_stream));
 
 	// Copy Probability
-	checkCudaErrors(cudaMemcpy(d_structures->probability, structures->probability, d_structures->probability_size*sizeof(PROBABILITY), cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->probability, structures->probability, d_structures->probability_size*sizeof(PROBABILITY), cudaMemcpyHostToDevice,copy_stream));
 
 	// Copy Additions
 	if (accurate) {
-		checkCudaErrors(cudaMemcpy(d_denominator, ini_denominator, esize*sizeof(uint), cudaMemcpyHostToDevice));
-		checkCudaErrors(cudaMemcpy(d_ini_numerator, ini_numerator, esize*sizeof(uint), cudaMemcpyHostToDevice));
+		checkCudaErrors(cudaMemcpyAsync(d_denominator, ini_denominator, esize*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
+		checkCudaErrors(cudaMemcpyAsync(d_ini_numerator, ini_numerator, esize*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
 	}	
+
+	//Final synchronize
+	//cudaDeviceSynchronize();
 
 	// Create a timer
 	sdkCreateTimer(&counters.timer);
 	
+
 	return true;
 }
 
@@ -674,8 +685,9 @@ void Simulator_gpu_dir::del() {
 }
 
 void Simulator_gpu_dir::reset(int sim_ini) {
-	checkCudaErrors(cudaMemcpy(d_structures->configuration.membrane, structures->configuration.membrane+sim_ini*options->num_environments*options->num_membranes, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyHostToDevice));
-	checkCudaErrors(cudaMemcpy(d_structures->configuration.multiset, structures->configuration.multiset+sim_ini*options->num_environments*esize, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyHostToDevice));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->configuration.membrane, structures->configuration.membrane+sim_ini*options->num_environments*options->num_membranes, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyHostToDevice,copy_stream));
+	checkCudaErrors(cudaMemcpyAsync(d_structures->configuration.multiset, structures->configuration.multiset+sim_ini*options->num_environments*esize, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyHostToDevice,copy_stream));
+	cudaStreamSynchronize(copy_stream);
 }
 
 __global__ void kernel_output_filter(MULTIPLICITY* d_output_multiset,

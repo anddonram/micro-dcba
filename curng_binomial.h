@@ -159,7 +159,7 @@ void curng_binomial_free(){
     curng_binomial_first = 0;
 }
 
-void curng_binomial_init(dim3 griddim, dim3 blockdim) {
+void curng_binomial_init(dim3 griddim, dim3 blockdim,cudaStream_t execution_stream) {
     const size_t sz = (griddim.x * griddim.y * blockdim.x * blockdim.y * blockdim.z)* sizeof(curandStateXORWOW_t);
    
     if(curng_binomial_first > 0){
@@ -173,7 +173,7 @@ void curng_binomial_init(dim3 griddim, dim3 blockdim) {
     // Old line for CUDA 4
     //cudaMemcpyToSymbol("curng_binomial_states_k", &curng_binomial_states, sizeof(curandState *), size_t(0),cudaMemcpyHostToDevice);
 
-    cudaMemcpyToSymbol(curng_binomial_states_k, &curng_binomial_states, sizeof(curandState *), size_t(0),cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbolAsync(curng_binomial_states_k, &curng_binomial_states, sizeof(curandState *), size_t(0),cudaMemcpyHostToDevice,execution_stream);
     
 #ifndef DEBUG
     struct timeval tval;
@@ -182,9 +182,9 @@ void curng_binomial_init(dim3 griddim, dim3 blockdim) {
 #else
     unsigned int timescale = 0;
 #endif
-    curng_binomial_init_kernel<<<griddim,blockdim>>>(timescale);
+    curng_binomial_init_kernel<<<griddim,blockdim,0,execution_stream>>>(timescale);
     getLastCudaError("Kernel initiating curng_binomial launch failure");
-    cudaDeviceSynchronize();
+    //cudaDeviceSynchronize();
 }
 
 unsigned int curng_sizeof_state(unsigned int num_threads) {
