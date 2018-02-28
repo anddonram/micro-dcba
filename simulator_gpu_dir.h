@@ -174,6 +174,7 @@ private:
 	/* Main phases */
 	int selection();
 	int execution();
+	bool check_step_errors();
 	
 	/***************************************************************/
 	/* The following defines how to use activation bit vectors ABV */

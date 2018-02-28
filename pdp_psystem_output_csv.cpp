@@ -96,7 +96,9 @@ bool PDP_Psystem_output_csv::write_configuration_filtered(unsigned int* filtered
 				int e=(((obj_index-o)/options->num_objects)-m)/options->num_membranes;
 
 				unsigned int multip=filtered_multisets[i+sim_offset];
+
 				if (multip>0) {
+
 					outfile << sim << ","
 							<< step << ","
 							<< e  << ","

@@ -149,10 +149,13 @@ bool Simulator_gpu_dir::step(int k){
 			if (execution())
 				return false;
 
+			//Check consistency and updating errors
+			if (check_step_errors())
+				return false;
+
             pdp_out->print_configuration();
 
             if ((i+1)%options->cycles==0) {
-
             	//Wait for possible previous copy to end
             	cudaStreamSynchronize(copy_stream);
             	retrieve_copy();
@@ -274,6 +277,7 @@ bool Simulator_gpu_dir::init() {
 	dep_mem+=asize*options->num_environments*sizeof(ABV_T); // ABV activations
 	dep_mem+=(1+options->num_membranes*options->num_environments)*sizeof(uint); //data error
 	dep_mem+=curng_sizeof_state(CU_THREADS*options->num_environments); //random data
+	dep_mem+=options->objects_to_output*sizeof(MULTIPLICITY);//output multiset
 
 	// Add new data structures depending on the number of simulations
 
@@ -915,6 +919,7 @@ __global__ void kernel_phase1_filters(
 		d_data_error[1+sim*options.num_environments*options.num_membranes+env*options.num_membranes+threadIdx.x]=m_c_charges[threadIdx.x];
 		d_data_error[1+gridDim.y*options.num_environments*options.num_membranes+
 			sim*options.num_environments*options.num_membranes+env*options.num_membranes+threadIdx.x]=m_c_conflicts[threadIdx.x];
+
 		if (threadIdx.x==0)// && d_data_error[0]!=CONSISTENCY_ERROR)
 			d_data_error[0]=CONSISTENCY_ERROR;
 	}
@@ -1247,11 +1252,10 @@ __global__ void kernel_phase1_update(
 			d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x]=s_abv[threadIdx.x];
 		}
 	}
-	
-	if (threadIdx.x==0 && update_error) {
+	//Changed: only save error if it was all ok until here (otherwise we would be overwriting, for example, CONSISTENCY_ERROR)
+	if (threadIdx.x==0 && update_error && d_data_error[0]==0) {
 		d_data_error[1+sim*options.num_environments*options.num_membranes+env*options.num_membranes]=block_upd_error;
-		if (d_data_error[0]!=UPDATING_CONFIGURATION_ERROR)
-			d_data_error[0]=UPDATING_CONFIGURATION_ERROR;		
+		d_data_error[0]=UPDATING_CONFIGURATION_ERROR;
 	}
 	
 	__syncthreads();
@@ -1295,9 +1299,10 @@ bool Simulator_gpu_dir::selection_phase1() {
 			d_structures->configuration, d_structures->lhs, d_structures->nb, *options,
 			d_abv, d_data_error);
 	
+	cudaStreamSynchronize(execution_stream);
+
 	getLastCudaError("kernel for phase 1 (filters) launch failure");	
 	//cutilDeviceSynchronize();	
-	cudaStreamSynchronize(execution_stream);
 
 	if (runcomp) {
 		sdkStopTimer(&counters.timer);
@@ -1305,46 +1310,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 		pdp_out->print_profiling_dcba_microphase_result(counters.timek1gpu);
 	}
 	
-	//TODO: stop this from pausing all stream while other data is being async copied
-	//specially data that is being output
-	checkCudaErrors(cudaMemcpyAsync(data_error, d_data_error, data_error_size*sizeof(uint), cudaMemcpyDeviceToHost,execution_stream));
 	
-	/* Checking mutual consistency */
-	pdp_out->print_profiling_dcba_microphase_name("Checking mutual consistency");
-	
-	if (data_error[0]==CONSISTENCY_ERROR) {
-		pdp_out->print_profiling_dcba_microphase_result(false);
-
-		checkCudaErrors(cudaMemcpyAsync(this->abv, this->d_abv, this->abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost,execution_stream));
-
-		cout << "Found inconsistent blocks:" << endl;
-		for (unsigned int sim=0; sim < options->num_parallel_simulations; sim++)
-			for (unsigned int env=0; env < options->num_environments; env++)
-				for (unsigned int membr=0; membr<options->num_membranes; membr++) {
-					uint charge=data_error[1+sim*options->num_environments*options->num_membranes+env*options->num_membranes+membr];
-					uint block=data_error[1+options->num_parallel_simulations*options->num_environments*options->num_membranes+
-											sim*options->num_environments*options->num_membranes+env*options->num_membranes+membr];
-					if (block!=UINT_MAX) {
-						cout << "For sim " << sim << ", env " << env << ", membr " << membr <<
-							" conflicts with charge " << charge << " for block " <<  block << endl;
-
-						for (int blk=0; blk<options->num_rule_blocks; blk++) {
-							uint am=GET_MEMBRANE(structures->ruleblock.membrane[blk]);
-							char ch=GET_BETA(structures->ruleblock.membrane[blk]);
-							if (is_active(blk,env,sim) && am==membr && ch==charge)
-								cout << "   Possibly conflicted with " << blk << endl;
-						}
-					}
-				}
-			
-		checkCudaErrors(cudaMemset(d_data_error,0,data_error_size*sizeof(uint)));
-
-		return false;
-	}
-	else
-		pdp_out->print_profiling_dcba_microphase_result(true);
-
-		
 	
 	for (int a=0; a<options->accuracy; a++) {
 		/* Apply kernel for normalization */
@@ -1366,10 +1332,10 @@ bool Simulator_gpu_dir::selection_phase1() {
 			d_structures->configuration, d_structures->lhs, d_structures->nr,
 			*options,d_denominator,d_numerator,d_ini_numerator,d_abv,obj_chunks);
 	
+    	cudaStreamSynchronize(execution_stream);
 	
 		getLastCudaError("kernel for phase 1 (normalization) launch failure");
 		//cutilDeviceSynchronize();	
-    	cudaStreamSynchronize(execution_stream);
 			
 		if (runcomp) {
 			sdkStopTimer(&counters.timer);
@@ -1388,35 +1354,17 @@ bool Simulator_gpu_dir::selection_phase1() {
 		kernel_phase1_update <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nb,
 			d_structures->nr, *options, d_abv, d_data_error);
+    	cudaStreamSynchronize(execution_stream);
 	
 		getLastCudaError("kernel for phase 1 (update) launch failure");
-		//cutilDeviceSynchronize();	
-    	cudaStreamSynchronize(execution_stream);
 
-		
+
 		if (runcomp) {
 			sdkStopTimer(&counters.timer);
 			counters.timek3gpu+=sdkGetTimerValue(&counters.timer);
 			pdp_out->print_profiling_dcba_microphase_result(counters.timek3gpu);
 		}
 		
-		/* Checking updating errors */
-		pdp_out->print_profiling_dcba_microphase_name("Checking updating errors");
-		
-		if (data_error[0]==UPDATING_CONFIGURATION_ERROR) {
-			pdp_out->print_profiling_dcba_microphase_result(false);
-
-			cout << "Stopped. Found errors:" << endl;
-			for (unsigned int sim=0; sim < options->num_parallel_simulations; sim++)
-				for (unsigned int env=0; env < options->num_environments; env++)
-					for (unsigned int membr=0; membr<options->num_membranes; membr++)
-						cout << "For sim " << sim << ", env " << env << ", membr " << membr <<
-						" error for block " << data_error[1+sim*options->num_environments*options->num_membranes+env*options->num_membranes+membr]-1 << endl;
-			
-			checkCudaErrors(cudaMemset(d_data_error,0,data_error_size*sizeof(uint)));
-			return false;
-		}
-		else pdp_out->print_profiling_dcba_microphase_result(true);
 	}
 	
 	pdp_out->print_block_selection();
@@ -2514,6 +2462,71 @@ int Simulator_gpu_dir::execution() {
 	return 0;
 }
 
+
+bool Simulator_gpu_dir::check_step_errors(){
+	//TODO: stop this from pausing all stream while other data is being async copied
+	//specially data that is being output
+	checkCudaErrors(cudaMemcpyAsync(data_error, d_data_error, data_error_size*sizeof(uint), cudaMemcpyDeviceToHost,execution_stream));
+
+	cudaStreamSynchronize(execution_stream);
+
+	/* Checking mutual consistency */
+	pdp_out->print_profiling_dcba_microphase_name("Checking mutual consistency");
+
+	if (data_error[0]==CONSISTENCY_ERROR) {
+		pdp_out->print_profiling_dcba_microphase_result(false);
+
+		checkCudaErrors(cudaMemcpy(this->abv, this->d_abv, this->abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost));
+
+		cout << "Found inconsistent blocks:" << endl;
+		for (unsigned int sim=0; sim < options->num_parallel_simulations; sim++)
+			for (unsigned int env=0; env < options->num_environments; env++)
+				for (unsigned int membr=0; membr<options->num_membranes; membr++) {
+					uint charge=data_error[1+sim*options->num_environments*options->num_membranes+env*options->num_membranes+membr];
+					uint block=data_error[1+options->num_parallel_simulations*options->num_environments*options->num_membranes+
+											sim*options->num_environments*options->num_membranes+env*options->num_membranes+membr];
+					if (block!=UINT_MAX) {
+						cout << "For sim " << sim << ", env " << env << ", membr " << membr <<
+							" conflicts with charge " << charge << " for block " <<  block << endl;
+
+						for (int blk=0; blk<options->num_rule_blocks; blk++) {
+							uint am=GET_MEMBRANE(structures->ruleblock.membrane[blk]);
+							char ch=GET_BETA(structures->ruleblock.membrane[blk]);
+							if (is_active(blk,env,sim) && am==membr && ch==charge)
+								cout << "   Possibly conflicted with " << blk << endl;
+						}
+					}
+				}
+
+		checkCudaErrors(cudaMemset(d_data_error,0,data_error_size*sizeof(uint)));
+
+		return true;
+	}
+	else
+		pdp_out->print_profiling_dcba_microphase_result(true);
+
+
+	/* Checking updating errors */
+	pdp_out->print_profiling_dcba_microphase_name("Checking updating errors");
+
+	if (data_error[0]==UPDATING_CONFIGURATION_ERROR) {
+		pdp_out->print_profiling_dcba_microphase_result(false);
+
+		cout << "Stopped. Found errors:" << endl;
+		for (unsigned int sim=0; sim < options->num_parallel_simulations; sim++)
+			for (unsigned int env=0; env < options->num_environments; env++)
+				for (unsigned int membr=0; membr<options->num_membranes; membr++)
+					cout << "For sim " << sim << ", env " << env << ", membr " << membr <<
+					" error for block " << data_error[1+sim*options->num_environments*options->num_membranes+env*options->num_membranes+membr]-1 << endl;
+
+		checkCudaErrors(cudaMemset(d_data_error,0,data_error_size*sizeof(uint)));
+		return true;
+	}
+	else pdp_out->print_profiling_dcba_microphase_result(true);
+
+	return false;
+
+}
 
 /*******************************************/
 /* Methods of the GPU wrapper for printing */
