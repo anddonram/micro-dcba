@@ -77,8 +77,31 @@ bool PDP_Psystem_output_binary::write_configuration_filtered(unsigned int* filte
 	//Output only somethings
 	if (filtered_multisets==NULL || config_charges==NULL) return false;
 	if (donotoutput) return true;
-	//TODO: write filtered
-	//	continue;
+
+
+	int esize=options->num_objects*options->num_membranes;
+	int msize=options->num_objects;
+
+	// Header of the chunk
+	*myhalfword=sim;
+	*myhalfword2=step;
+
+	outfile.write(buffer,4);
+
+	if(options->output_filter!=NULL){
+
+		//Filter, output only some things
+		if(options->GPU_filter){
+
+		}else{
+
+		}
+
+	}
+
+
+
+	outfile.flush();
 	return true;
 }
 bool PDP_Psystem_output_binary::write_configuration(unsigned int* config_multisets, char * config_charges, int sim, int step, char** objstrings) {

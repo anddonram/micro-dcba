@@ -27,7 +27,7 @@
 
 #include "pdp_psystem_source_binary.h"
 #include <string.h>
-
+#include <regex>
 using namespace std;
 
 /**********************************************************/
@@ -643,7 +643,7 @@ bool PDP_Psystem_source_binary::read_multisets() {
 bool PDP_Psystem_source_binary::read_filter() {
 	ifstream fis;
 	string line;
-	const char * line_start;
+
 	char * pEnd;
 
 	if (filter_filename==""){
@@ -665,52 +665,68 @@ bool PDP_Psystem_source_binary::read_filter() {
 			options->output_filter[i]=0;
 		}
 
+
+		std::cmatch cm;    // same as std::match_results<const char*> cm;
+		std::regex e ("^(-|\\d+) (-|\\d+) (-|\\d+)$");
 		//Start reading and get the values we want to save
 		 while ( getline (fis,line) )
 		 {
-			 line_start=line.c_str();
-			 //Extract the environment, membrane and object
-			 int env=strtol(line_start,&pEnd,10);
-			 if(line_start == pEnd) {
-				 /* strtol failed. Did not find environment index*/
-				 continue;
-			 }
-			 line_start=pEnd;
 
-			 int mem=strtol(line_start,&pEnd,10);
-			 if(line_start == pEnd) {
-				 /* strtol failed. Did not find membrane index*/
-				 continue;
-			 }
-			 line_start=pEnd;
+			 int env=0;
+			 int mem=0;
+			 int obj=0;
+			 int flags=0;
 
-			 int obj=strtol(line_start,&pEnd,10);
-			 if(line_start == pEnd) {
-				 /* strtol failed. Did not find object index */
+			 std::regex_match (line.c_str(),cm,e);
+
+			 if(cm.size()!=4){
+				 //One global match and three matches for each part, otherwise is not correct
 				 continue;
 			 }
 
-			 //Identify the index of the object and detect possible out of bounds
-			 int objectIndex=check_object(env,mem,obj);
+			 //Check if save for each environment
+			 if(cm[1] == "-"){
+				 //Advance the pointer two positions (- character and whitespace)
+				 flags+=1<<2;
+			 }else {
+				 //Extract the environment
+				 env=atoi(cm[1].str().c_str());
+			 }
 
-			 if(objectIndex==-1){
-				 //There was an error
-				 cout << "Detected invalid object (" << env << ", "<<mem<<", "<< obj << ")" << endl;
+
+			 //Check if save for each membrane
+			 if(cm[2] == "-"){
+				 //Advance the pointer two positions (- character and whitespace)
+				 flags+=1<<1;
 			 }else{
-				 //The object we want to save is correct, so we mark it
-
-				 //Say we have [0 1 1 0 0 1]
-				 //We will transform this into [1 2 5]
-				 //Besides, we can know the index where it will be written
-				 options->output_filter[options->objects_to_output]=objectIndex;
-
-				 options->objects_to_output++;
+				 //Extract the membrane
+				 mem=atoi(cm[2].str().c_str());
 			 }
+
+
+			 //Check if save for each object
+			 if(cm[3] == "-"){
+				 flags+=1;
+			 }else{
+				 //Extract the object
+				 obj=atoi(cm[3].str().c_str());
+			 }
+
+			 set_object_to_save(env,mem,obj,flags);
+
 		 }
 
+		//Say we have [0 1 1 0 0 1]
+		//We will transform this into [1 2 5]
 		//Copy the first part of the array and free the rest
 		unsigned int* filter_indexes=new unsigned int [options->objects_to_output];
-		memcpy(filter_indexes,options->output_filter,options->objects_to_output*sizeof(unsigned int));
+		int index=0;
+		for(int i=0;i<filter_length;i++){
+			if (options->output_filter[i] != 0){
+				filter_indexes[index++] = i;
+			}
+		}
+
 		//Free that large chunk of memory
 		delete [] options->output_filter;
 
@@ -725,6 +741,8 @@ bool PDP_Psystem_source_binary::read_filter() {
 	}
     if (!fis.fail() && fis.good() && fis.is_open())
     	fis.close();
+
+    return true;
 }
 int PDP_Psystem_source_binary::check_object(int env,int mem,int obj){
 	int objectIndex=-1;
@@ -737,6 +755,85 @@ int PDP_Psystem_source_binary::check_object(int env,int mem,int obj){
 	}
 
 	return objectIndex;
+}
+
+void PDP_Psystem_source_binary::set_object_to_save(int env,int mem,int obj,int flags){
+	 //Identify the index of the object and detect possible out of bounds
+	 int object_index=check_object(env,mem,obj);
+
+	 if(object_index==-1){
+		 //There was an error
+		 cout << "Detected invalid object (" << env << ", "<<mem<<", "<< obj << ")" << endl;
+	 }else{
+		 //The object we want to save is correct, so we mark it
+		 switch(flags){
+			case 0:
+				//Only specified object
+				set_object(object_index);
+				break;
+			case 1:
+				//All objects
+				for (unsigned int o=0; o<options->num_objects;o++) {
+					set_object(object_index+o);
+				}
+				break;
+			case 2:
+				//All membranes
+				for (int m=0;m<options->num_membranes;m++) {
+					set_object(object_index+m*options->num_objects);
+				}
+				break;
+			case 3:
+				//All membranes, all objects
+				for (int m=0;m<options->num_membranes;m++) {
+					for (unsigned int o=0; o<options->num_objects;o++) {
+						set_object(object_index+m*options->num_objects+o);
+					}
+				}
+				break;
+			case 4:
+				//All environments
+				for (int e=0;e<options->num_environments;e++) {
+					set_object(object_index
+							+e*options->num_objects*options->num_membranes);
+				}
+				break;
+			case 5:
+				//All environments, all objects
+				for (int e=0;e<options->num_environments;e++) {
+					for (unsigned int o=0; o<options->num_objects;o++) {
+						set_object(object_index
+								+e*options->num_objects*options->num_membranes
+								+o);
+					}
+				}
+				break;
+			case 6:
+				//All environments, all membranes
+				for (int e=0;e<options->num_environments;e++) {
+					for (int m=0;m<options->num_membranes;m++) {
+						set_object(object_index
+								+e*options->num_objects*options->num_membranes
+								+m*options->num_objects);
+					}
+				}
+				break;
+			case 7:
+				//That would mean no filter, so nothing for this
+				break;
+			default:
+				break;
+		 }
+
+
+	 }
+
+}
+void PDP_Psystem_source_binary::set_object(int object_index){
+	if(options->output_filter[object_index]==0){
+		options->output_filter[object_index]=1;
+		options->objects_to_output++;
+	}
 }
 /*******************************************************/
 /* Public methods inherited from pdp_system_source */
@@ -758,6 +855,7 @@ bool PDP_Psystem_source_binary::start() {
 	read_multisets();
 	
 	read_filter();
+
     } catch (FileException fe) {
 	cerr << fe.getMessage() << endl;
 	return false;

@@ -129,9 +129,13 @@ private:
 	bool read_inf_3();
 	bool read_multisets();
 	bool read_filter();
+
 	/*Returns the index of the object in the array if it is valid, otherwise returns -1
 	The object is invalid if the value for each parameter is out of bounds*/
 	int check_object(int env,int mem,int obj);
+
+	void set_object_to_save(int env,int mem,int obj,int flags);
+	void set_object(int object_index);
 	/* Class for errors and exceptions concerning the file */
 	class FileException {
 	    private:

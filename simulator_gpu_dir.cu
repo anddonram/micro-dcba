@@ -100,7 +100,6 @@ Simulator_gpu_dir::Simulator_gpu_dir(PDP_Psystem_REDIX* PDPps,int mode,bool accu
 	this->mode=mode;
 	this->accurate=accurate; // use n/d mode for normalization by default
 	error=false;
-
 	init();
 
 	// The real out (binary, csv...)
@@ -531,13 +530,11 @@ bool Simulator_gpu_dir::init() {
 	//Allocate filter if any
 	if(options->output_filter!=NULL){
 		options->GPU_filter=true;
-		unsigned int filter_length=options->objects_to_output;
-		checkCudaErrors(cudaMalloc((void**)&d_output_filter,filter_length*sizeof(unsigned int)));
-		checkCudaErrors(cudaMemcpyAsync(d_output_filter, options->output_filter,filter_length*sizeof(unsigned int), cudaMemcpyHostToDevice,copy_stream));
+		checkCudaErrors(cudaMalloc((void**)&d_output_filter,options->objects_to_output*sizeof(unsigned int)));
 
 		//Allocate compact multisets
-		checkCudaErrors(cudaMalloc((void**)&d_output_multiset,filter_length*sim_parallel*sizeof(MULTIPLICITY)));
-		checkCudaErrors(cudaMallocHost((void**)&output_multiset,filter_length*sim_parallel*sizeof(MULTIPLICITY)));
+		checkCudaErrors(cudaMalloc((void**)&d_output_multiset,sim_parallel*options->objects_to_output*sizeof(MULTIPLICITY)));
+		checkCudaErrors(cudaMallocHost((void**)&output_multiset,sim_parallel*options->objects_to_output*sizeof(MULTIPLICITY)));
 	}
 
 
@@ -553,21 +550,30 @@ bool Simulator_gpu_dir::init() {
 
 	// Allocate ABV
 	checkCudaErrors(cudaMalloc((void**)&d_abv,abv_size*sizeof(ABV_T)));
-	checkCudaErrors(cudaMemsetAsync(d_abv,0xFF,abv_size*sizeof(ABV_T),copy_stream));
 	
 	// Allocate Errors
 	checkCudaErrors(cudaMalloc((void**)&d_data_error,data_error_size*sizeof(uint)));
-	checkCudaErrors(cudaMemsetAsync(d_data_error,0,data_error_size*sizeof(uint),copy_stream));
 
 	// Allocate RNG states
 	//Now the kernel is launched in a stream, so it can execute while the rest of structures are copied to memory
 	//We must cudaStreamSynchronize after all the memory
 	curng_binomial_init(dim3(options->num_environments,options->num_parallel_simulations),CU_THREADS,execution_stream);
 
-
-	
 	/* Copies */
 	//Now they are async with curng_init!!!
+
+
+	// Set ABV
+	checkCudaErrors(cudaMemsetAsync(d_abv,0xFF,abv_size*sizeof(ABV_T),copy_stream));
+
+	// Set Errors
+	checkCudaErrors(cudaMemsetAsync(d_data_error,0,data_error_size*sizeof(uint),copy_stream));
+
+	//Copy filter filter
+	if(options->GPU_filter){
+		checkCudaErrors(cudaMemcpyAsync(d_output_filter, options->output_filter,options->objects_to_output*sizeof(unsigned int), cudaMemcpyHostToDevice,copy_stream));
+	}
+	
 
 	// Copy Ruleblock
 	checkCudaErrors(cudaMemcpyAsync(d_structures->ruleblock.lhs_idx, structures->ruleblock.lhs_idx, (d_structures->ruleblock_size+1)*sizeof(LHS_IDX), cudaMemcpyHostToDevice,copy_stream));
@@ -595,12 +601,13 @@ bool Simulator_gpu_dir::init() {
 		checkCudaErrors(cudaMemcpyAsync(d_ini_numerator, ini_numerator, esize*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
 	}	
 
-	//Final synchronize
-	//cudaDeviceSynchronize();
 
 	// Create a timer
 	sdkCreateTimer(&counters.timer);
-	
+
+	//Final synchronize
+	cudaStreamSynchronize(execution_stream);
+
 
 	return true;
 }
@@ -1299,9 +1306,10 @@ bool Simulator_gpu_dir::selection_phase1() {
 			d_structures->configuration, d_structures->lhs, d_structures->nb, *options,
 			d_abv, d_data_error);
 	
-	cudaStreamSynchronize(execution_stream);
 
+	cudaStreamSynchronize(execution_stream);
 	getLastCudaError("kernel for phase 1 (filters) launch failure");	
+
 	//cutilDeviceSynchronize();	
 
 	if (runcomp) {
@@ -1332,8 +1340,8 @@ bool Simulator_gpu_dir::selection_phase1() {
 			d_structures->configuration, d_structures->lhs, d_structures->nr,
 			*options,d_denominator,d_numerator,d_ini_numerator,d_abv,obj_chunks);
 	
-    	cudaStreamSynchronize(execution_stream);
-	
+
+		cudaStreamSynchronize(execution_stream);
 		getLastCudaError("kernel for phase 1 (normalization) launch failure");
 		//cutilDeviceSynchronize();	
 			
@@ -1354,8 +1362,8 @@ bool Simulator_gpu_dir::selection_phase1() {
 		kernel_phase1_update <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nb,
 			d_structures->nr, *options, d_abv, d_data_error);
-    	cudaStreamSynchronize(execution_stream);
-	
+
+		cudaStreamSynchronize(execution_stream);
 		getLastCudaError("kernel for phase 1 (update) launch failure");
 
 
@@ -1906,10 +1914,9 @@ bool Simulator_gpu_dir::selection_phase2(){
 			d_structures->configuration, d_structures->lhs, d_structures->nb, 
 			d_structures->nr, *options, d_abv);
 	
-		getLastCudaError("kernel for phase 2 launch failure");
-		//cutilDeviceSynchronize();	
-    	cudaStreamSynchronize(execution_stream);
 
+    	cudaStreamSynchronize(execution_stream);
+    	getLastCudaError("kernel for phase 2 launch failure");
 	}
 	else if (mode<2) {
 		if (pdp_out->will_print_dcba_phase())
@@ -1922,10 +1929,9 @@ bool Simulator_gpu_dir::selection_phase2(){
 		kernel_phase2_blhs <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nb, 
 			d_structures->nr, *options, d_abv);
-	
-		getLastCudaError("kernel for phase 2 launch failure");
-		//cutilDeviceSynchronize();	
+
     	cudaStreamSynchronize(execution_stream);
+    	getLastCudaError("kernel for phase 2 launch failure");
 
 	}
 	
@@ -2202,9 +2208,8 @@ bool Simulator_gpu_dir::selection_phase3() {
 		d_structures->nr, d_structures->probability, d_structures->pi_rule_size,
 		d_structures->pi_rule_size+d_structures->env_rule_size, *options);
 	 
-	getLastCudaError("kernel for phase 3 launch failure");	
 	cudaStreamSynchronize(execution_stream);
-
+	getLastCudaError("kernel for phase 3 launch failure");	
 
 	if (runcomp) {
 		sdkStopTimer(&counters.timer);
@@ -2412,10 +2417,11 @@ int Simulator_gpu_dir::execution() {
 		d_structures->nr, d_structures->pi_rule_size,
 		d_structures->pi_rule_size+d_structures->env_rule_size,
 		re_chunk, *options);
-	 
+
+	cudaStreamSynchronize(execution_stream);
 	getLastCudaError("kernel for phase 4 launch failure");
 	//cutilDeviceSynchronize();	
-	cudaStreamSynchronize(execution_stream);
+
 
 
 	if (runcomp) {
