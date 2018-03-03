@@ -136,6 +136,7 @@ private:
 
 	void set_object_to_save(int env,int mem,int obj,int flags);
 	void set_object(int object_index);
+	int obj_str_to_id(const char* obj_string);
 	/* Class for errors and exceptions concerning the file */
 	class FileException {
 	    private:

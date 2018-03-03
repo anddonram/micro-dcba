@@ -644,7 +644,7 @@ bool PDP_Psystem_source_binary::read_filter() {
 	ifstream fis;
 	string line;
 
-	char * pEnd;
+
 
 	if (filter_filename==""){
 		//No filtering at all
@@ -667,7 +667,7 @@ bool PDP_Psystem_source_binary::read_filter() {
 
 
 		std::cmatch cm;    // same as std::match_results<const char*> cm;
-		std::regex e ("^(-|\\d+) (-|\\d+) (-|\\d+)$");
+		std::regex e ("^(-|\\d+) (-|\\d+) (-|\\d+|.+)$");
 		//Start reading and get the values we want to save
 		 while ( getline (fis,line) )
 		 {
@@ -709,7 +709,14 @@ bool PDP_Psystem_source_binary::read_filter() {
 				 flags+=1;
 			 }else{
 				 //Extract the object
-				 obj=atoi(cm[3].str().c_str());
+				 const char * pStart=cm[3].str().c_str();
+				 char * pEnd;
+				 obj=strtol(pStart,&pEnd,10);
+
+				 //If is not an integer id, but a string, find its index
+				 if(pStart==pEnd){
+					 obj=obj_str_to_id(pStart);
+				 }
 			 }
 
 			 set_object_to_save(env,mem,obj,flags);
@@ -743,6 +750,19 @@ bool PDP_Psystem_source_binary::read_filter() {
     	fis.close();
 
     return true;
+}
+//TODO: a not efficient loop to find the objects, might take another approach
+int PDP_Psystem_source_binary::obj_str_to_id(const char* obj_string){
+	int id=-1;
+
+	for(int i=0;i<options->num_objects;i++){
+		if(strcmp(obj_string,id_objects[i])==0)
+		{
+			id=i;
+			break;
+		}
+	}
+	return id;
 }
 int PDP_Psystem_source_binary::check_object(int env,int mem,int obj){
 	int objectIndex=-1;
