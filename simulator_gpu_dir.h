@@ -424,6 +424,7 @@ public:
     }
 
     void print_temporal_configuration();
+    void print_block_competition(int competing_block,bool env_blocks);
 
     /* Concerning run comparison between GPU and CPU, and profiling */
     void print_profiling_table ();

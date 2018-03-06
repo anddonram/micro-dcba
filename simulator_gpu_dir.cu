@@ -177,7 +177,8 @@ bool Simulator_gpu_dir::step(int k){
 
     /* Output profiling information */
 	pdp_out->print_profiling_table();
-	
+
+
 	return true;
 }
 // The function we want to execute on the new thread.
@@ -2643,4 +2644,10 @@ void PDP_Psystem_redix_out_std_gpuwrapper::print_profiling_dcba_microphase_datum
 	cout << message1 << " " << datum << " " << message2 << endl;
 
 	cout.flush();
+}
+// This function should be called after executing the microphase
+void PDP_Psystem_redix_out_std_gpuwrapper::print_block_competition(int competing_block,bool env_blocks) {
+	if (!runcomp && !pdpout->will_print_configuration()) return;
+	pdpout->print_block_competition(competing_block,env_blocks);
+
 }

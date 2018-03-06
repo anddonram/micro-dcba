@@ -313,6 +313,12 @@ PDP_Psystem_REDIX::PDP_Psystem_REDIX(PDP_Psystem_source * source) {
 	
 	/* Finally, process end, and printing system */
 	print();
+//	for(int i=0;i<options->num_rule_blocks;i++){
+//		print_block_competition(i,false);
+//	}
+//	for(int i=options->num_rule_blocks;i<options->num_blocks_env+options->num_rule_blocks;i++){
+//			print_block_competition(i,true);
+//	}
 }
 
 void PDP_Psystem_REDIX::print() {
@@ -671,4 +677,44 @@ void PDP_Psystem_redix_out_std::print_temporal_configuration(int sim) {
 	
 	cout << "========> Temporal configuration:" << endl;
 	print_configuration(sim);
+}
+
+void PDP_Psystem_redix_out_std::print_block_competition(int competing_block,bool env_blocks){
+ pdp->print_block_competition(competing_block,env_blocks);
+}
+void PDP_Psystem_REDIX::print_block_competition(int competing_block, bool env_blocks){
+	int end_block=env_blocks?options->num_blocks_env+options->num_rule_blocks:options->num_rule_blocks;
+	cout << "--- Checking "<< (env_blocks?"environment ":"") <<"block " << competing_block << " competition ---" << endl;
+
+	for (int block=competing_block+1; block < end_block; block++) {
+
+		for (unsigned int j=structures->ruleblock.lhs_idx[competing_block]; j<structures->ruleblock.lhs_idx[competing_block+1]; j++){
+
+			bool competes=false;
+			for (unsigned int k=structures->ruleblock.lhs_idx[block]; k<structures->ruleblock.lhs_idx[block+1]; k++){
+				//If they share an object in the same membrane
+				if(structures->lhs.object[j]==structures->lhs.object[k]
+				         &&GET_MEMBR(structures->lhs.mmultiplicity[j])==GET_MEMBR(structures->lhs.mmultiplicity[k])){
+
+					// Also the blocks stand for different membranes OR
+					// They stand for the same membrane and have the same charge
+					if(GET_MEMBRANE(structures->ruleblock.membrane[block])!=GET_MEMBRANE(structures->ruleblock.membrane[competing_block])
+							|| (GET_ALPHA(structures->ruleblock.membrane[block])==GET_ALPHA(structures->ruleblock.membrane[competing_block])
+							//&& GET_BETA(structures->ruleblock.membrane[block])==GET_BETA(structures->ruleblock.membrane[competing_block])
+							)){
+
+						competes=true;
+						break;
+					}
+				}
+			}
+			if(competes){
+
+				cout << "\t Competes with  " << block << endl;
+				break;
+			}
+		}
+
+	}
+	//cout << endl << "--- Competition end ---" << endl << endl;
 }

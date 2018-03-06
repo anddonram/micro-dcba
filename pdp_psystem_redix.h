@@ -69,7 +69,7 @@ class PDP_Psystem_REDIX: public PDP_Psystem {
 public:
 	PDP_Psystem_REDIX(PDP_Psystem_source* PDPps_source);
 	void print();
-
+	void print_block_competition(int competing_block,bool env_blocks);
 	/*
 	 * Definition file for structures
 	 */
@@ -215,6 +215,9 @@ public:
     /* Verbosity 6 */
     inline bool will_print_temporal_configuration() {return options->verbose>=6;}
     void print_temporal_configuration(int sim);
+
+    /*Info for micro DCBA*/
+    void print_block_competition(int competing_block,bool env_blocks);
 };
 
 #endif
