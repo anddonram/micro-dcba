@@ -78,9 +78,9 @@ int main (int argc, char* argv[]) {
 	options->verbose=0;
 	options->debug = false;
 	options->output_filter=NULL;
-
+	options->fast=false;
 	// TODO: use getopt_long function to support arguments of type "--blocks"
-	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:")) != -1) {
+	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:d")) != -1) {
 		switch (c) {
 		/* For randomly generated system */
 		case 'R':
@@ -130,7 +130,9 @@ int main (int argc, char* argv[]) {
 			break;
 		case 'w':
 			filter_file = optarg;
-
+			break;
+		case 'd':
+			options->fast=true;
 			break;
 		case 'O':
 			outputtype=atoi(optarg);
@@ -162,6 +164,7 @@ int main (int argc, char* argv[]) {
 					" -w: filter output file" << endl <<
 					" -s: number of simulations"<< endl <<
 					" -a: accuracy in the algorithms" << endl <<
+					" -d: fast, less accurate RNG initialization (GPU-only)" << endl <<
 					" -t: time steps" << endl <<
 					" -c: steps per cycle of model" << endl <<
 					" -I: select the implementation: " << endl <<

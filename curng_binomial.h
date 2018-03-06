@@ -153,13 +153,26 @@ __global__ void curng_binomial_init_kernel(unsigned int time){
     unsigned int idx = __IDX;
     curand_init (time , idx , 5000 , &curng_binomial_states_k[idx]) ;
 }
+/*
+ * State setup can be an expensive operation.
+ * One way to speed up the setup is to use different seeds for each thread and a constant sequence number of 0.
+ * This can be especially helpful if many generators need to be created.
+ * While faster to set up, this method provides less guarantees about the mathematical properties of the generated sequences.
+ * Read more at: http://docs.nvidia.com/cuda/curand/index.html#ixzz58yQ1t0JQ
+ * Follow us: @GPUComputing on Twitter | NVIDIA on Facebook
+ *
+ * */
+__global__ void curng_binomial_init_kernel_fast(unsigned int time){
+    unsigned int idx = __IDX;
+    curand_init (idx+time ,0 , 5000 , &curng_binomial_states_k[idx]) ;
+}
 
 void curng_binomial_free(){
     cudaFree(curng_binomial_states);
     curng_binomial_first = 0;
 }
 
-void curng_binomial_init(dim3 griddim, dim3 blockdim,cudaStream_t execution_stream) {
+void curng_binomial_init(dim3 griddim, dim3 blockdim,cudaStream_t execution_stream,bool fast) {
     const size_t sz = (griddim.x * griddim.y * blockdim.x * blockdim.y * blockdim.z)* sizeof(curandStateXORWOW_t);
    
     if(curng_binomial_first > 0){
@@ -176,15 +189,26 @@ void curng_binomial_init(dim3 griddim, dim3 blockdim,cudaStream_t execution_stre
     cudaMemcpyToSymbolAsync(curng_binomial_states_k, &curng_binomial_states, sizeof(curandState *), size_t(0),cudaMemcpyHostToDevice,execution_stream);
     
 #ifndef DEBUG
-    struct timeval tval;
-    gettimeofday(&tval,NULL);
-    unsigned int timescale = tval.tv_usec;
+	struct timeval tval;
+	gettimeofday(&tval,NULL);
+	unsigned int timescale = tval.tv_usec;
 #else
-    unsigned int timescale = 0;
+	unsigned int timescale = 0;
 #endif
-    curng_binomial_init_kernel<<<griddim,blockdim,0,execution_stream>>>(timescale);
-    getLastCudaError("Kernel initiating curng_binomial launch failure");
+
+	if(fast){
+		curng_binomial_init_kernel_fast<<<griddim,blockdim,0,execution_stream>>>(timescale);
+	}else{
+
+    	curng_binomial_init_kernel<<<griddim,blockdim,0,execution_stream>>>(timescale);
+    }
+
+
+
+    //No point in syncing if we want to overlap with data transfers
     //cudaDeviceSynchronize();
+    //getLastCudaError("Kernel initiating curng_binomial launch failure");
+
 }
 
 unsigned int curng_sizeof_state(unsigned int num_threads) {

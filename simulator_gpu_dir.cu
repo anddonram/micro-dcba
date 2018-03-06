@@ -558,7 +558,7 @@ bool Simulator_gpu_dir::init() {
 	// Allocate RNG states
 	//Now the kernel is launched in a stream, so it can execute while the rest of structures are copied to memory
 	//We must cudaStreamSynchronize after all the memory
-	curng_binomial_init(dim3(options->num_environments,options->num_parallel_simulations),CU_THREADS,execution_stream);
+	curng_binomial_init(dim3(options->num_environments,options->num_parallel_simulations),CU_THREADS,execution_stream,options->fast);
 
 	/* Copies */
 	//Now they are async with curng_init!!!
@@ -607,7 +607,7 @@ bool Simulator_gpu_dir::init() {
 	sdkCreateTimer(&counters.timer);
 
 	//Final synchronize
-	cudaStreamSynchronize(execution_stream);
+	//cudaStreamSynchronize(execution_stream);
 
 
 	return true;
@@ -746,7 +746,7 @@ void Simulator_gpu_dir::retrieve_copy() {
 									options->objects_to_output,
 									options->num_environments*esize);
 	}
-	getLastCudaError("Error copying filtered output device to device");
+	//getLastCudaError("Error copying filtered output device to device");
 
 	checkCudaErrors(cudaMemcpyAsync(d_configuration.membrane, d_structures->configuration.membrane,d_structures->configuration.membrane_size*sizeof(CHARGE), cudaMemcpyDeviceToDevice,execution_stream));
 	checkCudaErrors(cudaMemcpyAsync(d_configuration.multiset, d_structures->configuration.multiset,d_structures->configuration.multiset_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToDevice,execution_stream));
@@ -1308,12 +1308,11 @@ bool Simulator_gpu_dir::selection_phase1() {
 			d_abv, d_data_error);
 	
 
-	cudaStreamSynchronize(execution_stream);
-	getLastCudaError("kernel for phase 1 (filters) launch failure");	
-
-	//cutilDeviceSynchronize();	
 
 	if (runcomp) {
+		cudaStreamSynchronize(execution_stream);
+		getLastCudaError("kernel for phase 1 (filters) launch failure");
+
 		sdkStopTimer(&counters.timer);
 		counters.timek1gpu=sdkGetTimerValue(&counters.timer);
 		pdp_out->print_profiling_dcba_microphase_result(counters.timek1gpu);
@@ -1342,11 +1341,11 @@ bool Simulator_gpu_dir::selection_phase1() {
 			*options,d_denominator,d_numerator,d_ini_numerator,d_abv,obj_chunks);
 	
 
-		cudaStreamSynchronize(execution_stream);
-		getLastCudaError("kernel for phase 1 (normalization) launch failure");
-		//cutilDeviceSynchronize();	
 			
 		if (runcomp) {
+			cudaStreamSynchronize(execution_stream);
+			getLastCudaError("kernel for phase 1 (normalization) launch failure");
+
 			sdkStopTimer(&counters.timer);
 			counters.timek2gpu+=sdkGetTimerValue(&counters.timer);
 			pdp_out->print_profiling_dcba_microphase_result(counters.timek2gpu);
@@ -1364,11 +1363,12 @@ bool Simulator_gpu_dir::selection_phase1() {
 			d_structures->configuration, d_structures->lhs, d_structures->nb,
 			d_structures->nr, *options, d_abv, d_data_error);
 
-		cudaStreamSynchronize(execution_stream);
-		getLastCudaError("kernel for phase 1 (update) launch failure");
 
 
 		if (runcomp) {
+			cudaStreamSynchronize(execution_stream);
+			getLastCudaError("kernel for phase 1 (update) launch failure");
+
 			sdkStopTimer(&counters.timer);
 			counters.timek3gpu+=sdkGetTimerValue(&counters.timer);
 			pdp_out->print_profiling_dcba_microphase_result(counters.timek3gpu);
@@ -1916,8 +1916,6 @@ bool Simulator_gpu_dir::selection_phase2(){
 			d_structures->nr, *options, d_abv);
 	
 
-    	cudaStreamSynchronize(execution_stream);
-    	getLastCudaError("kernel for phase 2 launch failure");
 	}
 	else if (mode<2) {
 		if (pdp_out->will_print_dcba_phase())
@@ -1931,12 +1929,13 @@ bool Simulator_gpu_dir::selection_phase2(){
 			d_structures->configuration, d_structures->lhs, d_structures->nb, 
 			d_structures->nr, *options, d_abv);
 
-    	cudaStreamSynchronize(execution_stream);
-    	getLastCudaError("kernel for phase 2 launch failure");
 
 	}
 	
 	if (runcomp) {
+    	cudaStreamSynchronize(execution_stream);
+    	getLastCudaError("kernel for phase 2 launch failure");
+
 		sdkStopTimer(&counters.timer);
 		counters.timesp2gpu=sdkGetTimerValue(&counters.timer);
 		pdp_out->print_profiling_dcba_microphase_result(counters.timesp2gpu);
@@ -2209,10 +2208,11 @@ bool Simulator_gpu_dir::selection_phase3() {
 		d_structures->nr, d_structures->probability, d_structures->pi_rule_size,
 		d_structures->pi_rule_size+d_structures->env_rule_size, *options);
 	 
-	cudaStreamSynchronize(execution_stream);
-	getLastCudaError("kernel for phase 3 launch failure");	
 
 	if (runcomp) {
+		cudaStreamSynchronize(execution_stream);
+		getLastCudaError("kernel for phase 3 launch failure");
+
 		sdkStopTimer(&counters.timer);
 		counters.timesp3gpu=sdkGetTimerValue(&counters.timer);
 //		if (options->verbose>0)	cout << counters.timesp3gpu << "ms." << endl;
@@ -2419,13 +2419,12 @@ int Simulator_gpu_dir::execution() {
 		d_structures->pi_rule_size+d_structures->env_rule_size,
 		re_chunk, *options);
 
-	cudaStreamSynchronize(execution_stream);
-	getLastCudaError("kernel for phase 4 launch failure");
-	//cutilDeviceSynchronize();	
-
 
 
 	if (runcomp) {
+		cudaStreamSynchronize(execution_stream);
+		getLastCudaError("kernel for phase 4 launch failure");
+
 		sdkStopTimer(&counters.timer);
 		counters.timesp4gpu=sdkGetTimerValue(&counters.timer);
 //		if (options->verbose>0)	cout << counters.timesp4gpu << "ms." << endl;

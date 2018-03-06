@@ -59,7 +59,12 @@ struct _options{
 	unsigned int* output_filter;
 	//Counts the number of objects that will be output, to allocate an array
 	unsigned int objects_to_output;
+
+	//Whether the output will be filtered in the GPU or the CPU
 	bool GPU_filter=false;
+
+	//Whether the RNG with curand_init (GPU only) will be faster but less accurate.
+	bool fast=false;
 };
 
 typedef struct _options * Options;
