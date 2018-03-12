@@ -713,7 +713,7 @@ __global__ void kernel_output_filter(MULTIPLICITY* d_output_multiset,
 	//Only write if we are not out of bounds
 	if(tidx<max_objects){
 		//Thread tidx will write to position tidx
-		//The to be written at position tidx object_id is stored in d_output_filter
+		//The object_id to be written at position tidx is stored in d_output_filter
 		uint obj_id=d_output_filter[tidx];
 
 		//Get object from proper position taking offset into account
@@ -1495,7 +1495,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 	
 		/* Checking ABV */
 		ABV_T *debug_abv= new ABV_T[abv_size];
-		checkCudaErrors(cudaMemcpyAsync(debug_abv, d_abv, abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost,execution_stream));
+		checkCudaErrors(cudaMemcpy(debug_abv, d_abv, abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost));
 
 		int count_errors=0;
 		for (unsigned int sim=0; sim < options->num_parallel_simulations; sim++) {
@@ -1520,7 +1520,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 		
 		//d_nb=new uint[d_structures->nb_size];
 		/* CALCULATING DIFFERENCES */
-		checkCudaErrors(cudaMemcpyAsync(d_nb, d_structures->nb, d_structures->nb_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,execution_stream));
+		checkCudaErrors(cudaMemcpy(d_nb, d_structures->nb, d_structures->nb_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost));
 		int diff=0;
 		int s_diff=0;
 		int g_diff=0;
@@ -1960,15 +1960,15 @@ bool Simulator_gpu_dir::selection_phase2(){
 		pdp_out->print_profiling_dcba_microphase_name("Checking maximality");
 		ABV_T *debug_abv= new ABV_T[abv_size];
 		
-		checkCudaErrors(cudaMemcpyAsync(debug_abv, d_abv, abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost,execution_stream));
+		checkCudaErrors(cudaMemcpy(debug_abv, d_abv, abv_size*sizeof(ABV_T), cudaMemcpyDeviceToHost));
 
 		d_cfg.multiset = new MULTIPLICITY[structures->configuration.multiset_size];
 				
-		checkCudaErrors(cudaMemcpyAsync(d_cfg.multiset, d_structures->configuration.multiset, d_structures->configuration.multiset_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,execution_stream));
+		checkCudaErrors(cudaMemcpy(d_cfg.multiset, d_structures->configuration.multiset, d_structures->configuration.multiset_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost));
 
 		//checkCudaErrors(cudaMemcpy(structures->nr, d_structures->nr, d_structures->nr_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost));
 
-		checkCudaErrors(cudaMemcpyAsync(d_nb, d_structures->nb, d_structures->nb_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,execution_stream));
+		checkCudaErrors(cudaMemcpy(d_nb, d_structures->nb, d_structures->nb_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost));
 		
 //		print_block_applications(d_nb);
 //
