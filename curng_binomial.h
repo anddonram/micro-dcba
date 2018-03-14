@@ -174,7 +174,7 @@ void curng_binomial_free(){
 
 void curng_binomial_init(dim3 griddim, dim3 blockdim,cudaStream_t execution_stream,bool fast) {
     const size_t sz = (griddim.x * griddim.y * blockdim.x * blockdim.y * blockdim.z)* sizeof(curandStateXORWOW_t);
-   
+
     if(curng_binomial_first > 0){
         curng_binomial_free();
     }
@@ -182,12 +182,12 @@ void curng_binomial_init(dim3 griddim, dim3 blockdim,cudaStream_t execution_stre
     curng_binomial_first++;
 
     cudaMalloc((void **)&curng_binomial_states, sz);
-    
+
     // Old line for CUDA 4
     //cudaMemcpyToSymbol("curng_binomial_states_k", &curng_binomial_states, sizeof(curandState *), size_t(0),cudaMemcpyHostToDevice);
 
     cudaMemcpyToSymbolAsync(curng_binomial_states_k, &curng_binomial_states, sizeof(curandState *), size_t(0),cudaMemcpyHostToDevice,execution_stream);
-    
+
 #ifndef DEBUG
 	struct timeval tval;
 	gettimeofday(&tval,NULL);
@@ -199,15 +199,14 @@ void curng_binomial_init(dim3 griddim, dim3 blockdim,cudaStream_t execution_stre
 	if(fast){
 		curng_binomial_init_kernel_fast<<<griddim,blockdim,0,execution_stream>>>(timescale);
 	}else{
-
     	curng_binomial_init_kernel<<<griddim,blockdim,0,execution_stream>>>(timescale);
     }
 
 
 
     //No point in syncing if we want to overlap with data transfers
-    //cudaDeviceSynchronize();
-    //getLastCudaError("Kernel initiating curng_binomial launch failure");
+//    cudaDeviceSynchronize();
+//    getLastCudaError("Kernel initiating curng_binomial launch failure");
 
 }
 

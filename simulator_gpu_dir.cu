@@ -48,6 +48,7 @@
 #include <timestat.h>
 #include <cstdlib>
 #include <future>
+
 using namespace std;
 
 #define CU_THREADS 256
@@ -277,13 +278,16 @@ bool Simulator_gpu_dir::init() {
 	dep_mem+=asize*options->num_environments*sizeof(ABV_T); // ABV activations
 	dep_mem+=(1+options->num_membranes*options->num_environments)*sizeof(uint); //data error
 	dep_mem+=curng_sizeof_state(CU_THREADS*options->num_environments); //random data
-	dep_mem+=options->objects_to_output*sizeof(MULTIPLICITY);//output multiset
+
+	dep_mem+=options->num_membranes*options->num_environments*sizeof(CHARGE); // membrane for async copy
+	dep_mem+=options->num_objects*options->num_membranes*options->num_environments*sizeof(MULTIPLICITY); //multiset for async copy
+	dep_mem+=options->objects_to_output*sizeof(MULTIPLICITY); // filtered multiset
 
 	// Add new data structures depending on the number of simulations
 
 	sim_parallel=gsl_min(options->num_simulations,(((unsigned int) max_memory_gpu*0.8)-options->mem)/dep_mem);
 	options->num_parallel_simulations=sim_parallel;
-	options->mem+=dep_mem*sim_parallel;
+
 
 	/* Printing information */
 
@@ -303,6 +307,7 @@ bool Simulator_gpu_dir::init() {
                 "=> Parallel simulations: " << sim_parallel << endl <<
                 "=> Total memory: " << options->mem + dep_mem*sim_parallel << endl;
 
+	options->mem+=dep_mem*sim_parallel;
 	/************************************/
 	/* Initialization of GPU structures */
 	/************************************/
@@ -549,19 +554,24 @@ bool Simulator_gpu_dir::init() {
 	}
 
 
+
 	// Allocate ABV
 	checkCudaErrors(cudaMalloc((void**)&d_abv,abv_size*sizeof(ABV_T)));
-	
+
+
 	// Allocate Errors
 	checkCudaErrors(cudaMalloc((void**)&d_data_error,data_error_size*sizeof(uint)));
 
+
 	// Allocate RNG states
 	//Now the kernel is launched in a stream, so it can execute while the rest of structures are copied to memory
-	//We must cudaStreamSynchronize after all the memory
+	//We must cudaStreamSynchronize after all the memory is set
 	curng_binomial_init(dim3(options->num_environments,options->num_parallel_simulations),CU_THREADS,execution_stream,options->fast);
 
 	/* Copies */
 	//Now they are async with curng_init!!!
+
+
 
 
 	// Set ABV

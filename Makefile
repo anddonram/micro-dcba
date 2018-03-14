@@ -72,7 +72,7 @@ INCLUDES	:=  -I../counterslib/inc -I../../common/inc\
 		    -I$(CUDA_PATH)/include -I.
 
 LIB		:= -L../../common/lib -L../counterslib/lib \
-                   -ltimestat -lgsl -lgslcblas 
+                   -ltimestat -lgsl -lgslcblas -lcuda
 
 # You need to have GSL installed, if you are on linux, install the packages
 # gsl-bin libgsl0-dev
@@ -107,7 +107,7 @@ endif
 
 #NVCCFLAGS += $(addprefix --compiler-options ,$(CXXFLAGS)) 
 #NVCXXFLAGS ?= --compiler-options $(CXXFLAGS)
-NVCCFLAGS += -Xcompiler $(CXXFLAGS)
+NVCCFLAGS += -Xcompiler $(CXXFLAGS) -rdc=true
 
 ALL_CFLAGS := $(INCLUDES) $(CXXFLAGS)
 ALL_LDFLAGS := $(LIB)
@@ -135,7 +135,7 @@ GENCODE_FLAGS   :=  $(GENCODE_SM35) $(GENCODE_SM50)
 OBJDIR	:= objs
 
 # CUDA source files (compiled with nvcc)
-CUFILES	:= simulator_gpu_dir.cu
+CUFILES	:= simulator_gpu_dir.cu competition.cu
 
 # C++ source files (compiled with g++)
 CCFILES	:= binbit.cpp pdp_psystem_source_random.cpp\
@@ -155,7 +155,7 @@ CCHFILES := binbit.h pdp_psystem.h pdp_psystem.h\
 	simulator_gpu_omp_dir.h simulator_omp_redir.h simulator_seq_dir.h\
 	simulator_seq_table.h
 
-CUHFILES := curng_binomial.h simulator_gpu_dir.h
+CUHFILES := curng_binomial.h simulator_gpu_dir.h competition.h
 
 OBJS := $(patsubst %.cpp,$(OBJDIR)/%.cpp.o, $(CCFILES))
 OBJS += $(patsubst %.cu,$(OBJDIR)/%.cu.o, $(CUFILES))

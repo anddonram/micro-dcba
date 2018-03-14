@@ -26,6 +26,7 @@
     along with ABCD-GPU.  If not, see <http://www.gnu.org/licenses/>. */
 
 #include "pdp_psystem_redix.h"
+#include "competition.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>
@@ -313,6 +314,8 @@ PDP_Psystem_REDIX::PDP_Psystem_REDIX(PDP_Psystem_source * source) {
 	
 	/* Finally, process end, and printing system */
 	print();
+
+	print_competition();
 //	for(int i=0;i<options->num_rule_blocks;i++){
 //		print_block_competition(i,false);
 //	}
@@ -331,7 +334,7 @@ void PDP_Psystem_REDIX::print() {
 	unsigned int rhsmem = structures->rhs_size * (sizeof(OBJECT)+sizeof(MULTIPLICITY));
 	unsigned int multmem = structures->configuration.multiset_size * sizeof(MULTIPLICITY);
 	unsigned int mbmem = structures->configuration.membrane_size * sizeof(CHARGE);
-
+	unsigned int fmem=options->objects_to_output*sizeof(OBJECT);//output filter
 	options->mem = brmem+lhsmem+rmem+pmem+rhsmem+multmem+mbmem;
 
 	if (options->verbose > 1) {
@@ -472,7 +475,7 @@ void PDP_Psystem_REDIX::print() {
         cout << "Multisets: " << multmem << " (" << multmem/1024 << "KB)" << endl;
         cout << "Membrane: " << mbmem << " (" << mbmem/1024 << "KB)" << endl;
 
-        unsigned long int memb = options->mem = brmem+lhsmem+rmem+pmem+rhsmem+multmem+mbmem;
+        unsigned long int memb = options->mem = brmem+lhsmem+rmem+pmem+rhsmem+multmem+mbmem+fmem;
         int count=0;
         float div=1;
         char unit[6]={' ','K','M','G','T','P'};
@@ -717,4 +720,27 @@ void PDP_Psystem_REDIX::print_block_competition(int competing_block, bool env_bl
 
 	}
 	//cout << endl << "--- Competition end ---" << endl << endl;
+}
+
+void PDP_Psystem_REDIX::print_competition()
+{
+	int* partition=new int[options->num_rule_blocks];
+	int* trans_partition=new int[options->num_rule_blocks];
+	int* alphabet=new int[options->num_objects];
+	competition::reset_partition(partition,
+			alphabet,
+			options->num_rule_blocks,
+			options->num_objects);
+	competition::make_partition(partition,structures->ruleblock.lhs_idx,
+			structures->lhs.object,
+			options->num_rule_blocks,
+			alphabet,
+			options->num_rule_blocks,
+			options->num_objects,
+			structures->ruleblock.membrane,
+			structures->lhs.mmultiplicity);
+	competition::normalize_partition(partition,trans_partition,options->num_rule_blocks);
+
+	//competition::print_rules(structures->ruleblock.lhs_idx,structures->lhs.object,options->num_rule_blocks,options->num_objects);
+	competition::print_partition(trans_partition,alphabet,options->num_rule_blocks,options->num_objects);
 }

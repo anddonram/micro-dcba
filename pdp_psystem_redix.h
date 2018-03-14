@@ -70,6 +70,7 @@ public:
 	PDP_Psystem_REDIX(PDP_Psystem_source* PDPps_source);
 	void print();
 	void print_block_competition(int competing_block,bool env_blocks);
+	void print_competition();
 	/*
 	 * Definition file for structures
 	 */
