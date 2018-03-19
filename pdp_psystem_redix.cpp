@@ -731,6 +731,12 @@ void PDP_Psystem_REDIX::print_competition()
 			alphabet,
 			options->num_rule_blocks,
 			options->num_objects);
+	clock_t cpu_startTime, cpu_endTime;
+
+    double cpu_ElapseTime=0;
+    cpu_startTime = clock();
+
+
 	competition::make_partition(partition,structures->ruleblock.lhs_idx,
 			structures->lhs.object,
 			options->num_rule_blocks,
@@ -739,6 +745,14 @@ void PDP_Psystem_REDIX::print_competition()
 			options->num_objects,
 			structures->ruleblock.membrane,
 			structures->lhs.mmultiplicity);
+
+    cpu_endTime = clock();
+
+    cpu_ElapseTime = ((cpu_endTime - cpu_startTime)/(double)CLOCKS_PER_SEC);
+
+    std::cout<< "CPU partition time: "<< cpu_ElapseTime <<std::endl;
+
+
 	competition::normalize_partition(partition,trans_partition,options->num_rule_blocks);
 
 	//competition::print_rules(structures->ruleblock.lhs_idx,structures->lhs.object,options->num_rule_blocks,options->num_objects);

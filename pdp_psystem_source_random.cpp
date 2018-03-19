@@ -132,7 +132,7 @@ unsigned int PDP_Psystem_source_random::pi_loop_lhs() {
 }
 
 char PDP_Psystem_source_random::pi_lhs_charge() {
-	return 0;
+	return random()%3;
 }
 
 unsigned int PDP_Psystem_source_random::pi_lhs_membrane() {
@@ -230,7 +230,7 @@ unsigned int PDP_Psystem_source_random::pi_loop_rhs() {
 }
 
 char PDP_Psystem_source_random::pi_rhs_charge() {
-	return 0;
+	return random()%3;
 }
 
 unsigned int PDP_Psystem_source_random::pi_rhs_membrane() {
