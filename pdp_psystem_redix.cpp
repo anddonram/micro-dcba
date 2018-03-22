@@ -683,7 +683,7 @@ void PDP_Psystem_redix_out_std::print_temporal_configuration(int sim) {
 }
 
 void PDP_Psystem_redix_out_std::print_block_competition(int competing_block,bool env_blocks){
- pdp->print_block_competition(competing_block,env_blocks);
+  pdp->print_block_competition(competing_block,env_blocks);
 }
 void PDP_Psystem_REDIX::print_block_competition(int competing_block, bool env_blocks){
 	int end_block=env_blocks?options->num_blocks_env+options->num_rule_blocks:options->num_rule_blocks;
