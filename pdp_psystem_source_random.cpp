@@ -65,6 +65,14 @@ PDP_Psystem_source_random::~PDP_Psystem_source_random() {
 }
 
 bool PDP_Psystem_source_random::start() {
+	mutree=new unsigned int [options->num_membranes-1];
+	//Membrane 1's parent is the environment
+	mutree[0]=0;
+	//Membrane (i+1)'s parent is random from 1 to i
+	for (int i=1;i<options->num_membranes-1;i++){
+		mutree[i]=random()%(i) +1;
+		//cout<<"membrane "<< i+1<< " has parent:" <<mutree[i]<< endl;
+	}
 	lengthU= new short int[options->num_rule_blocks];
 	for (int i=0;i<options->num_rule_blocks;i++)
 		lengthU[i]=0;
@@ -127,21 +135,22 @@ unsigned int PDP_Psystem_source_random::pi_loop_lhs() {
 	if (lengthV[rule_block_it]+lengthU[rule_block_it]==0) {
 		lengthV[rule_block_it]=random() % (options->max_lhs-1) + 1;
 		lengthU[rule_block_it]=random() % (options->max_lhs-lengthV[rule_block_it]);
+		active_membrane[rule_block_it]=random() % (options->num_membranes-1) +1;
 	}
 	return lengthV[rule_block_it]+lengthU[rule_block_it];
 }
 
 char PDP_Psystem_source_random::pi_lhs_charge() {
-	return random()%3;
+	return 0;//random()%3;
 }
 
 unsigned int PDP_Psystem_source_random::pi_lhs_membrane() {
-	active_membrane[rule_block_it]=random() % (options->num_membranes-1) +1;
+
 	return active_membrane[rule_block_it];
 }
 
 unsigned int PDP_Psystem_source_random::pi_lhs_parent_membrane() {
-	return 0;
+	return mutree[active_membrane[rule_block_it]-1];
 }
 
 unsigned int PDP_Psystem_source_random::pi_lhs_loop_U() {
@@ -230,7 +239,7 @@ unsigned int PDP_Psystem_source_random::pi_loop_rhs() {
 }
 
 char PDP_Psystem_source_random::pi_rhs_charge() {
-	return random()%3;
+	return 0;//random()%3;
 }
 
 unsigned int PDP_Psystem_source_random::pi_rhs_membrane() {

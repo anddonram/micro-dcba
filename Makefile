@@ -93,12 +93,12 @@ CXXFLAGS	:= -fopenmp
 ifeq ($(dbg),1)
       NVCCFLAGS += -g -G -D DEBUG
       CXXFLAGS += -g -O0 -D DEBUG
-      LIB += -lefence
+      #LIB += -lefence
       TARGET := debug
 else ifeq ($(dbg),2)
       NVCCFLAGS += -g -G -D DEBUG -D BIN_DEBUG
       CXXFLAGS += -g -O0 -D DEBUG -D BIN_DEBUG
-      LIB += -lefence
+      #LIB += -lefence
       TARGET := debug
 else
       CXXFLAGS += -O2
@@ -122,10 +122,10 @@ ALL_LDFLAGS := $(LIB)
 #GENCODE_SM12    := -gencode arch=compute_12,code=sm_12
 #GENCODE_SM13    := -gencode arch=compute_13,code=sm_13
 #GENCODE_SM20    := -gencode arch=compute_20,code=sm_20
-GENCODE_SM35    := -gencode arch=compute_35,code=\"sm_35,compute_35\"
+#GENCODE_SM35    := -gencode arch=compute_35,code=\"sm_35,compute_35\"
 GENCODE_SM50    := -gencode arch=compute_50,code=\"sm_50,compute_50\"
-GENCODE_FLAGS   :=  $(GENCODE_SM35) $(GENCODE_SM50)  
-#$(GENCODE_SM12) $(GENCODE_SM13) $(GENCODE_SM20)\
+GENCODE_FLAGS   :=  $(GENCODE_SM50)  
+#$(GENCODE_SM35)  $(GENCODE_SM12) $(GENCODE_SM13) $(GENCODE_SM20)\
 	
 
 

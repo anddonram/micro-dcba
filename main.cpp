@@ -169,7 +169,7 @@ int main (int argc, char* argv[]) {
 					" -c: steps per cycle of model" << endl <<
 					" -I: select the implementation: " << endl <<
 					"     -> 0 for OpenMP simulator (default). For a multicore parallel execution, execute 'export OMP_NUM_THREADS=X' on the terminal (X should be the number of processors - 1 for best performance)," << endl <<
-					"     -> 1 for GPU simulator. It requires to have a CUDA capable GPU on the system, with compute capability 1.2 or later." << endl <<
+					"     -> 1 for GPU simulator. It requires to have a CUDA capable GPU on the system, with compute capability 5.0 or later." << endl <<
 					"     -> (deprecated simulators): 10 for table based simulator, 11 for sequential simulator, 12 for parallel OpenMP simulator" << endl <<
 					" -M: select an execution mode:" << endl <<
 					"     -> if I=1, M sets the behaviour of the GPU simulator: 0 runs GPU simulator (default), 1 (profiling) runs also the CPU gold code, 2 (profiling) runs with CPU and phase2 basic kernel" << endl <<
