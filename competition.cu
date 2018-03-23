@@ -134,8 +134,7 @@ __global__ void make_partition_phase_1_kernel_3(int* partition,
 
 		for (unsigned int k=rule_id_begin; k<rule_id_end; k++){
 
-			val=min(val,alphabet[lhs_object[k]+
-			                     GET_MEMBR(mmultiplicity[k])*ALPHABET]);
+			val=min(val,alphabet[lhs_object[k]]);
 		}
 
 		partition[idx]=val;
@@ -159,8 +158,7 @@ __global__ void make_partition_phase_1_5_kernel_3(int* partition,
 		unsigned val=partition[idx];
 
 		for (unsigned int j=rule_id_begin; j<rule_id_end; j++){
-			int old_val=atomicMin((alphabet+lhs_object[j]
-			                  +GET_MEMBR(mmultiplicity[j])*ALPHABET),val);
+			int old_val=atomicMin((alphabet+lhs_object[j]),val);
 			if(old_val!=val)
 				change=true;
 		}
@@ -207,8 +205,7 @@ __global__ void get_partition_kernel(int* partition,
 	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
 	if (idx < NUM_RULES){
 
-		partition[idx]=alphabet[GET_MEMBR(mmultiplicity[rules_size[idx]])*ALPHABET
-		                        +lhs_object[rules_size[idx]]];
+		partition[idx]=alphabet[lhs_object[rules_size[idx]]];
 		//printf("set rule %i %i with object %u and partition %i \n",idx,rules_size[idx],lhs_object[rules_size[idx]],partition[idx]);
 
 	}
@@ -254,11 +251,11 @@ void make_partition_gpu(int* partition,
 	const int blockCount1 = (num_rules+BLOCK_SIZE-1)/BLOCK_SIZE;
 
 
-//	make_partition_phase_0_kernel_3<<<blockCount,BLOCK_SIZE>>>(
-//			d_lhs_object,
-//			d_mmultiplicity,
-//			num_objects,
-//			total_lhs);
+	make_partition_phase_0_kernel_3<<<blockCount,BLOCK_SIZE>>>(
+			d_lhs_object,
+			d_mmultiplicity,
+			num_objects,
+			total_lhs);
     make_partition_kernel_3<<<1,1>>>(d_partition,
     		d_rules_size,
     		d_lhs_object,
