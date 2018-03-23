@@ -65,6 +65,9 @@ struct _options{
 
 	//Whether the RNG with curand_init (GPU only) will be faster but less accurate.
 	bool fast=false;
+
+	//After how many steps will the errors be brought from gpu
+	int error_cycle;
 };
 
 typedef struct _options * Options;

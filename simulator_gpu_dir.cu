@@ -150,7 +150,7 @@ bool Simulator_gpu_dir::step(int k){
 				return false;
 
 			//Check consistency and updating errors
-			if (check_step_errors())
+			if ((i+1)%options->error_cycle==0 && check_step_errors())
 				return false;
 
             pdp_out->print_configuration();
@@ -934,9 +934,11 @@ __global__ void kernel_phase1_filters(
 	}
 	
 	if (c_conflict && (threadIdx.x < options.num_membranes)) {
-		d_data_error[1+sim*options.num_environments*options.num_membranes+env*options.num_membranes+threadIdx.x]=m_c_charges[threadIdx.x];
-		d_data_error[1+gridDim.y*options.num_environments*options.num_membranes+
-			sim*options.num_environments*options.num_membranes+env*options.num_membranes+threadIdx.x]=m_c_conflicts[threadIdx.x];
+		d_data_error[1+sim*options.num_environments*options.num_membranes
+		             +env*options.num_membranes+threadIdx.x]=m_c_charges[threadIdx.x];
+		d_data_error[1+gridDim.y*options.num_environments*options.num_membranes
+		             +sim*options.num_environments*options.num_membranes
+		             +env*options.num_membranes+threadIdx.x]=m_c_conflicts[threadIdx.x];
 
 		if (threadIdx.x==0)// && d_data_error[0]!=CONSISTENCY_ERROR)
 			d_data_error[0]=CONSISTENCY_ERROR;

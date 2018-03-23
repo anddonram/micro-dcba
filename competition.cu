@@ -18,21 +18,27 @@
 
 namespace competition{
 
+__global__ void  make_partition_phase_0_kernel_3(
+		unsigned int*lhs_object,
+		unsigned int* mmultiplicity,
+		int ALPHABET,
+		int total_lhs);
+
 __global__ void make_partition_phase_1_kernel_3(int* partition,
 		unsigned int* rules_size,
-				unsigned int*lhs_object,
-				unsigned int* mmultiplicity,
-				int * alphabet,
-				int NUM_RULES,
-				int ALPHABET,
-				int num_membranes);
+		unsigned int*lhs_object,
+		unsigned int* mmultiplicity,
+		int * alphabet,
+		int NUM_RULES,
+		int ALPHABET,
+		int num_membranes);
 __global__ void make_partition_phase_1_5_kernel_3(int* partition,
 		unsigned int* rules_size,
-				unsigned int*lhs_object,
-				unsigned int* mmultiplicity,
-				int * alphabet,
-				int NUM_RULES,
-				int ALPHABET);
+		unsigned int*lhs_object,
+		unsigned int* mmultiplicity,
+		int * alphabet,
+		int NUM_RULES,
+		int ALPHABET);
 __global__ void make_partition_phase_2_kernel_3(int* partition,
 		unsigned int* rules_size,
 		unsigned int*lhs_object,
@@ -95,9 +101,21 @@ __global__ void make_partition_kernel_3(int* partition,
 //		printf("\n");
 	}
 
-	get_partition_kernel<<<blockCount1, BLOCK_SIZE>>> (partition,rules_size,lhs_object,mmultiplicity,alphabet,NUM_RULES,ALPHABET);
 
 }
+__global__ void make_partition_phase_0_kernel_3(
+				unsigned int*lhs_object,
+				unsigned int* mmultiplicity,
+				int ALPHABET,
+				int total_lhs){
+	unsigned idx = blockIdx.x*blockDim.x+threadIdx.x;
+
+	if (idx < total_lhs){
+		lhs_object[idx]=lhs_object[idx]+
+                GET_MEMBR(mmultiplicity[idx])*ALPHABET;
+	}
+}
+
 __global__ void make_partition_phase_1_kernel_3(int* partition,
 		unsigned int* rules_size,
 		unsigned int*lhs_object,
@@ -231,8 +249,16 @@ void make_partition_gpu(int* partition,
 	CUDA_CHECK_RETURN(cudaMemcpy(d_alphabet, alphabet, sizeof(int)*num_objects*num_membranes, cudaMemcpyHostToDevice));
 	CUDA_CHECK_RETURN(cudaMemcpy(d_mmultiplicity, mmultiplicity, sizeof(MULTIPLICITY)*mult_size, cudaMemcpyHostToDevice));
 
+	static const int BLOCK_SIZE = 256;
+	const int blockCount = (total_lhs+BLOCK_SIZE-1)/BLOCK_SIZE;
+	const int blockCount1 = (num_rules+BLOCK_SIZE-1)/BLOCK_SIZE;
 
 
+//	make_partition_phase_0_kernel_3<<<blockCount,BLOCK_SIZE>>>(
+//			d_lhs_object,
+//			d_mmultiplicity,
+//			num_objects,
+//			total_lhs);
     make_partition_kernel_3<<<1,1>>>(d_partition,
     		d_rules_size,
     		d_lhs_object,
@@ -241,6 +267,14 @@ void make_partition_gpu(int* partition,
     		num_objects,
     		num_membranes,
     		d_mmultiplicity);
+	get_partition_kernel<<<blockCount1, BLOCK_SIZE>>> (
+			d_partition,
+			d_rules_size,
+			d_lhs_object,
+			d_mmultiplicity,
+			d_alphabet,
+			num_rules,
+			num_objects);
 
     cudaDeviceSynchronize();
 

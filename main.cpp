@@ -79,8 +79,11 @@ int main (int argc, char* argv[]) {
 	options->debug = false;
 	options->output_filter=NULL;
 	options->fast=false;
+	options->error_cycle=1;
+	//By default, errors are brought each the cycle of steps, along with the configuration data
+	bool error_with_common_cycle=true;
 	// TODO: use getopt_long function to support arguments of type "--blocks"
-	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:d")) != -1) {
+	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:dE:")) != -1) {
 		switch (c) {
 		/* For randomly generated system */
 		case 'R':
@@ -137,6 +140,10 @@ int main (int argc, char* argv[]) {
 		case 'O':
 			outputtype=atoi(optarg);
 			break;
+		case 'E':
+			options->error_cycle=atoi(optarg);
+			error_with_common_cycle=false;
+			break;
 		case 'I':
 			mode=atoi(optarg);
 			break;
@@ -167,6 +174,7 @@ int main (int argc, char* argv[]) {
 					" -d: fast, less accurate RNG initialization (GPU-only)" << endl <<
 					" -t: time steps" << endl <<
 					" -c: steps per cycle of model" << endl <<
+					" -E: steps per cycle of error data retrieval. If not specified, defaults to steps per cycle of model." << endl <<
 					" -I: select the implementation: " << endl <<
 					"     -> 0 for OpenMP simulator (default). For a multicore parallel execution, execute 'export OMP_NUM_THREADS=X' on the terminal (X should be the number of processors - 1 for best performance)," << endl <<
 					"     -> 1 for GPU simulator. It requires to have a CUDA capable GPU on the system, with compute capability 5.0 or later." << endl <<
@@ -199,7 +207,9 @@ int main (int argc, char* argv[]) {
 			return 0;
 		}
 	}
-	
+	if(error_with_common_cycle){
+		options->error_cycle=options->cycles;
+	}
 	if (mode==20) {
 		cout << "Glad to see you master, here you have your sample binary file..." << endl;
 		PDP_Psystem_source_binary* source=new PDP_Psystem_source_binary(options);
