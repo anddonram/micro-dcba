@@ -24,6 +24,18 @@ void make_partition(int* partition,unsigned int* rules_size,unsigned int*lhs_obj
 
 void make_partition_gpu(int* partition,unsigned int* rules_size,unsigned int*lhs_object,int * alphabet,int num_rules,int num_objects,int num_membranes ,unsigned int* mmultiplicity,int mult_size);
 
+/*Identical version to the GPU, except sequential
+ *
+ */
+void make_partition_2(int* partition,
+		unsigned int* rules_size,
+		unsigned int* lhs_object,
+		int * alphabet,
+		int num_rules,
+		int num_objects,
+		int num_membranes,
+		unsigned int* mmultiplicity,
+		int mult_size);
 
 //New version, takes membranes into account
 bool check_compete(int block_a,int block_b,unsigned int* rules_size,unsigned int * lhs_object,unsigned int *membrane, unsigned int* mmultiplicity);

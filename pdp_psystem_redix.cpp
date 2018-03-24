@@ -724,6 +724,8 @@ void PDP_Psystem_REDIX::print_block_competition(int competing_block, bool env_bl
 
 void PDP_Psystem_REDIX::print_competition()
 {
+
+	//GPU version
 	int* partition=new int[options->num_rule_blocks];
 	int* trans_partition=new int[options->num_rule_blocks];
 	int* alphabet=new int[options->num_objects*options->num_membranes];
@@ -759,37 +761,75 @@ void PDP_Psystem_REDIX::print_competition()
 	//competition::print_rules(structures->ruleblock.lhs_idx,structures->lhs.object,options->num_rule_blocks,options->num_objects);
 	//competition::print_partition(trans_partition,alphabet,options->num_rule_blocks,options->num_objects*options->num_membranes);
 
+	//CPU version 1
+//	int* trans_partition_2=new int[options->num_rule_blocks];
+//	int* alphabet_2=new int[options->num_objects];
+//	competition::reset_partition(partition,
+//			alphabet_2,
+//			options->num_rule_blocks,
+//			options->num_objects);
+//
+//
+//    cpu_ElapseTime=0;
+//    cpu_startTime = clock();
+//
+//
+//	competition::make_partition(partition,
+//			structures->ruleblock.lhs_idx,
+//			structures->lhs.object,
+//			alphabet_2,
+//			options->num_rule_blocks,
+//			options->num_objects,
+//			structures->ruleblock.membrane,
+//			structures->lhs.mmultiplicity);
+//
+//    cpu_endTime = clock();
+//
+//    cpu_ElapseTime = ((cpu_endTime - cpu_startTime)/(double)CLOCKS_PER_SEC);
+//
+//    std::cout<< "CPU partition time: "<< cpu_ElapseTime <<std::endl;
+//
+//
+//	competition::normalize_partition(partition,trans_partition_2,options->num_rule_blocks);
+//
+//	//competition::print_comparing_partition(trans_partition,alphabet,trans_partition_2,alphabet_2,options->num_rule_blocks,options->num_objects);
+//	competition::compare_partition(trans_partition,alphabet,trans_partition_2,alphabet_2,options->num_rule_blocks,options->num_objects);
+
+	//CPU version 2
 
 	int* trans_partition_2=new int[options->num_rule_blocks];
-	int* alphabet_2=new int[options->num_objects];
+	int* alphabet_2=new int[options->num_objects*options->num_membranes];
+
 	competition::reset_partition(partition,
 			alphabet_2,
 			options->num_rule_blocks,
-			options->num_objects);
-
+			options->num_objects*options->num_membranes);
 
     cpu_ElapseTime=0;
     cpu_startTime = clock();
 
 
-	competition::make_partition(partition,
-			structures->ruleblock.lhs_idx,
-			structures->lhs.object,
-			alphabet_2,
-			options->num_rule_blocks,
-			options->num_objects,
-			structures->ruleblock.membrane,
-			structures->lhs.mmultiplicity);
+    competition::make_partition_2(partition,
+    			structures->ruleblock.lhs_idx,
+    			structures->lhs.object,
+    			alphabet_2,
+    			options->num_rule_blocks,
+    			options->num_objects,
+    			options->num_membranes,
+    			structures->lhs.mmultiplicity,
+    			structures->lhs_size);
 
     cpu_endTime = clock();
 
     cpu_ElapseTime = ((cpu_endTime - cpu_startTime)/(double)CLOCKS_PER_SEC);
 
-    std::cout<< "CPU partition time: "<< cpu_ElapseTime <<std::endl;
+    std::cout<< "CPU partition v2 time: "<< cpu_ElapseTime <<std::endl;
 
 
 	competition::normalize_partition(partition,trans_partition_2,options->num_rule_blocks);
 
-	//competition::print_comparing_partition(trans_partition,alphabet,trans_partition_2,alphabet_2,options->num_rule_blocks,options->num_objects);
+//	competition::print_comparing_partition(trans_partition,alphabet,trans_partition_2,alphabet_2,options->num_rule_blocks,options->num_objects);
 	competition::compare_partition(trans_partition,alphabet,trans_partition_2,alphabet_2,options->num_rule_blocks,options->num_objects);
+
+
 }

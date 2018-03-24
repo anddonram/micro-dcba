@@ -222,7 +222,6 @@ void make_partition_gpu(int* partition,
 		int num_rules,
 		int num_objects,
 		int num_membranes,
-
 		unsigned int* mmultiplicity,
 		int mult_size){
 	int * d_partition;
@@ -348,11 +347,189 @@ void make_partition(int* partition, unsigned int* rules_size,unsigned int*lhs_ob
 		}
 }
 
+void make_partition_phase_0(
+				unsigned int*lhs_object,
+				unsigned int* mmultiplicity,
+				int ALPHABET,
+				int total_lhs){
+
+	for(int idx=0;idx<total_lhs;idx++)
+	{
+		lhs_object[idx]+= GET_MEMBR(mmultiplicity[idx])*ALPHABET;
+	}
+}
+void undo_make_partition_phase_0(
+				unsigned int*lhs_object,
+				unsigned int* mmultiplicity,
+				int ALPHABET,
+				int total_lhs){
+
+	for(int idx=0;idx<total_lhs;idx++)
+	{
+		lhs_object[idx]-= GET_MEMBR(mmultiplicity[idx])*ALPHABET;
+	}
+}
+void make_partition_phase_1(int* partition,
+		unsigned int* rules_size,
+		unsigned int*lhs_object,
+		unsigned int* mmultiplicity,
+		int * alphabet,
+		int NUM_RULES,
+		int ALPHABET,
+		int num_membranes) {
+
+	for(int idx=0;idx<NUM_RULES;idx++){
+
+		unsigned rule_id_begin=rules_size[idx];
+		unsigned rule_id_end=rules_size[idx+1];
+		int val=ALPHABET*num_membranes;
+
+		for (unsigned int k=rule_id_begin; k<rule_id_end; k++){
+			val=min(val,alphabet[lhs_object[k]]);
+		}
+
+		partition[idx]=val;
+
+	}
+}
+bool make_partition_phase_1_5(int* partition,
+		unsigned int* rules_size,
+		unsigned int* lhs_object,
+		unsigned int* mmultiplicity,
+		int * alphabet,
+		int NUM_RULES,
+		int ALPHABET) {
+
+	bool change=false;
+	for(int idx=0;idx<NUM_RULES;idx++){
+
+		unsigned rule_id_begin=rules_size[idx];
+		unsigned rule_id_end=rules_size[idx+1];
+
+		unsigned val=partition[idx];
+
+		for (unsigned int j=rule_id_begin; j<rule_id_end; j++){
+			int old_val=alphabet[lhs_object[j]];
+			if(old_val!=val){
+				change=true;
+				alphabet[lhs_object[j]]=min(old_val,val);
+			}
+		}
+
+
+	}
+	return change;
+}
+
+//Pointer jumping
+bool make_partition_phase_2(int* partition,
+		unsigned int* rules_size,
+		unsigned int*lhs_object,
+		int * alphabet,
+		int NUM_RULES,
+		int ALPHABET,
+		int num_membranes) {
+	bool change=false;
+
+	for(int idx=0;idx<ALPHABET*num_membranes;idx++)
+	{
+		int i =alphabet[idx];
+		int i_1 =alphabet[i];
+		if(i_1!=i){
+			//We must do another loop
+			change=true;
+		}
+		while(i_1!=i)
+		{
+			i=i_1;
+			i_1=alphabet[i];
+		}
+		alphabet[idx]=i_1;
+
+	}
+	return change;
+}
+
+
+void get_partition(int* partition,
+		unsigned int* rules_size,
+		unsigned int*lhs_object,
+		unsigned int* mmultiplicity,
+		int * alphabet,
+		int NUM_RULES,
+		int ALPHABET) {
+
+	for(int idx=0;idx<NUM_RULES;idx++)
+		{
+		partition[idx]=alphabet[lhs_object[rules_size[idx]]];
+		//printf("set rule %i %i with object %u and partition %i \n",idx,rules_size[idx],lhs_object[rules_size[idx]],partition[idx]);
+	}
+}
+
+
+/**
+ * Sequential version of partition kernel version 3
+ * It works!!
+ */
+void make_partition_2(int* partition,
+		unsigned int* rules_size,
+		unsigned int* lhs_object,
+		int * alphabet,
+		int num_rules,
+		int num_objects,
+		int num_membranes,
+		unsigned int* mmultiplicity,
+		int mult_size){
+	int total_lhs=rules_size[num_rules];
+
+	make_partition_phase_0(
+				lhs_object,
+				mmultiplicity,
+				num_objects,
+				total_lhs);
+
+	bool change=true;
+	bool exit_loop=false;
+
+	while(change || !exit_loop){
+		//If nothing changed, we must give a last pass
+		exit_loop=!change;
+		change=false;
+
+		make_partition_phase_1( partition, rules_size, lhs_object,mmultiplicity, alphabet, num_rules, num_objects, num_membranes);
+		change=make_partition_phase_1_5( partition, rules_size, lhs_object,mmultiplicity, alphabet, num_rules, num_objects)||change;
+		change=make_partition_phase_2( partition,  rules_size, lhs_object, alphabet, num_rules, num_objects, num_membranes)||change;
+	}
+
+	get_partition(
+			partition,
+			rules_size,
+			lhs_object,
+			mmultiplicity,
+			alphabet,
+			num_rules,
+			num_objects);
+	undo_make_partition_phase_0(
+					lhs_object,
+					mmultiplicity,
+					num_objects,
+					total_lhs);
+
+}
+
+
 /**
  * Modified sequential version of partition kernel version 3
- * It works
+ * It works, but too slow
  */
-void make_partition(int* partition, unsigned int* rules_size,unsigned int*lhs_object,int * alphabet,int num_rules,int num_objects,unsigned int *membrane, unsigned int* mmultiplicity){
+void make_partition(int* partition,
+		unsigned int* rules_size,
+		unsigned int*lhs_object,
+		int * alphabet,
+		int num_rules,
+		int num_objects,
+		unsigned int *membrane,
+		unsigned int* mmultiplicity){
 	bool change=true;
 	bool exit_loop=false;
 
