@@ -143,7 +143,7 @@ __global__ void make_partition_phase_1_kernel_3(int* partition,
 }
 __global__ void make_partition_phase_1_5_kernel_3(int* partition,
 		unsigned int* rules_size,
-		unsigned int*lhs_object,
+		unsigned int* lhs_object,
 		unsigned int* mmultiplicity,
 		int * alphabet,
 		int NUM_RULES,

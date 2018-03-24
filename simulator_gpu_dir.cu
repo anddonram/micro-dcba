@@ -342,7 +342,7 @@ bool Simulator_gpu_dir::init() {
 	for (unsigned int i=0; i<data_error_size; i++)
 		data_error[i]=0;
 	
-	/* Initialize aux data on CPU only if neccessary */
+	/* Initialize aux data on CPU only if necessary */
 	structures->nb_size=(options->num_rule_blocks+options->num_blocks_env)*options->num_environments*sim_parallel;
 		
 	/* Initialize Nb only inf CPU is going to be executed */
