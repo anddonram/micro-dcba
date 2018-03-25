@@ -2482,8 +2482,7 @@ int Simulator_gpu_dir::execution() {
 
 
 bool Simulator_gpu_dir::check_step_errors(){
-	//TODO: stop this from pausing all stream while other data is being async copied
-	//specially data that is being output
+
 	checkCudaErrors(cudaMemcpyAsync(data_error, d_data_error, data_error_size*sizeof(uint), cudaMemcpyDeviceToHost,execution_stream));
 
 	cudaStreamSynchronize(execution_stream);

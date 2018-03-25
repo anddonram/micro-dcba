@@ -712,7 +712,11 @@ int normalize_partition(int* partition, int* trans_partition,int size){
 
 	return part_index;
 }
-void initialize_partition_structures(int* partition,int num_partitions,int* rules_size,int num_rules,int *lhs_object){
+void initialize_partition_structures(int* partition,
+		int num_partitions,
+		int* rules_size,
+		int num_rules,
+		int *lhs_object){
 
 	Options* opt=new Options[num_partitions];
 
@@ -722,6 +726,7 @@ void initialize_partition_structures(int* partition,int num_partitions,int* rule
 	}
 	for(int i=0;i<num_rules;i++){
 		opt[partition[i]]->num_rule_blocks++;
+
 	}
 
 }

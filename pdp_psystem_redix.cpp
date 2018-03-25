@@ -826,7 +826,7 @@ void PDP_Psystem_REDIX::print_competition()
     std::cout<< "CPU partition v2 time: "<< cpu_ElapseTime <<std::endl;
 
 
-	competition::normalize_partition(partition,trans_partition_2,options->num_rule_blocks);
+	int num_partitions=competition::normalize_partition(partition,trans_partition_2,options->num_rule_blocks);
 
 //	competition::print_comparing_partition(trans_partition,alphabet,trans_partition_2,alphabet_2,options->num_rule_blocks,options->num_objects);
 	competition::compare_partition(trans_partition,alphabet,trans_partition_2,alphabet_2,options->num_rule_blocks,options->num_objects);
