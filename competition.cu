@@ -726,7 +726,6 @@ void initialize_partition_structures(int* partition,
 	}
 	for(int i=0;i<num_rules;i++){
 		opt[partition[i]]->num_rule_blocks++;
-
 	}
 
 }

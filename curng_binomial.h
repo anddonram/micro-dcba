@@ -88,7 +88,7 @@ static inline __device__ unsigned int curng_binomial_binv(unsigned int n, float 
     unsigned int idx = __IDX;
     curandStateXORWOW_t localState = curng_binomial_states_k[idx];
     unsigned int x = 0;
-    
+
     //float p1 = fmin(p,1.f-p);
     //Algorithm starts here. (attribute 'x' assigned to '0')
     float q = 1.f - p;
@@ -104,9 +104,9 @@ static inline __device__ unsigned int curng_binomial_binv(unsigned int n, float 
 		break;
     }
     //Algorithm finishes here.
-    if (x>n) 
+    if (x>n)
 	x=n;
-    
+
     curng_binomial_states_k[idx] = localState;
     //x = (p<0.5f)? x : n-x;
     return x;
@@ -121,15 +121,15 @@ static inline __device__ unsigned int curng_binomial_norm(unsigned int n, float 
     unsigned int idx = __IDX;
     curandStateXORWOW_t localState = curng_binomial_states_k[idx];
     unsigned int x = 0;
-    
+
     float z = curand_normal(&localState);
     float mean = ((float)n)*p;
     float stddev = sqrt(mean*(1.-p));
     x = (unsigned int)((z*stddev)+mean);
-    
-    if (x>n) 
+
+    if (x>n)
 	x=n;
-    
+
     curng_binomial_states_k[idx] = localState;
     return x;
 }
@@ -141,6 +141,7 @@ static inline __device__ unsigned int curng_binomial_random(unsigned int n, floa
     else if (p==0.0f)
 	k=0;
     else */
+
     if (n*fmin(p,1.0f-p) < 10)
         k = curng_binomial_binv(n,p);
     else{

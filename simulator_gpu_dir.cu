@@ -1680,6 +1680,109 @@ __global__ void kernel_phase2_generic(PDP_Psystem_REDIX::Ruleblock ruleblock,
 	}
 }
 
+__global__ void kernel_phase2_partition(PDP_Psystem_REDIX::Ruleblock ruleblock,
+		PDP_Psystem_REDIX::Configuration configuration,
+		PDP_Psystem_REDIX::Lhs lhs,
+		PDP_Psystem_REDIX::NR nb,
+		PDP_Psystem_REDIX::NR nr,
+		struct _options options,
+		uint * d_abv,
+		int *partition,
+		int num_partitions) {
+
+	extern __shared__ uint sData[];
+	//Next b counts the number of blocks
+
+	//BDim is num_environments?
+	uint bdim = blockDim.x;
+	//Activation bit vectors?
+	uint * s_abv = sData;
+	//Rule order
+	uint * s_blocks = sData+(bdim >> ABV_LOG_WORD_SIZE);
+	//Active blocks per partition
+	uint * s_active_blocks_per_partition=s_blocks+bdim;
+
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint block=threadIdx.x;
+
+	//Num of ruleblocks and communication rules
+	//At most, only num_rule_blocks
+	uint besize=options.num_blocks_env+options.num_rule_blocks;
+	//Environment size
+	uint esize=options.num_objects*options.num_membranes;
+	//Membrane size
+	uint msize=options.num_objects;
+	uint asize=(besize>>ABV_LOG_WORD_SIZE) + 1;
+	uint block_chunks=(options.num_rule_blocks + bdim - 1)>>CU_LOG_THREADS;
+
+
+
+	//Iterate rule blocks
+	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
+
+		if(threadIdx.x<num_partitions){
+			s_active_blocks_per_partition[threadIdx.x]=0;
+		}
+
+		block=bchunk*bdim+threadIdx.x;
+
+		if (threadIdx.x < (bdim>>ABV_LOG_WORD_SIZE)
+			&& threadIdx.x < asize-((bchunk*bdim)>>ABV_LOG_WORD_SIZE)) {
+			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*bdim)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
+		}
+
+		//Calculate random order per partition
+		if (block < options.num_objects && d_is_active(threadIdx.x,s_abv)) {
+			s_blocks[atomicInc((s_active_blocks_per_partition+partition[block]),bdim+2)]=block;
+		}
+		__syncthreads();
+
+
+		//Each partition in parallel:
+		//1. iterate rules in random order
+		//2. for each rule, calculate minimum applications
+		//3. for each rule, update applications and configurations
+		if(threadIdx.x<num_partitions){
+			uint o_init,o_end;
+			uint available_rules=s_active_blocks_per_partition[threadIdx.x];
+
+			for(int i=0;i<available_rules;i++){
+				uint apps=UINT_MAX;
+
+				block=s_blocks[i];
+
+				//Indexes and lhs lengths
+				o_init=ruleblock.lhs_idx[block];
+				o_end=ruleblock.lhs_idx[block+1];
+
+				//Get minimum applications
+				for (int o=o_init; o < o_end; o++) {
+					uint obj=lhs.object[o];
+					uint membr=lhs.mmultiplicity[o];
+					uint rule_mult = GET_MULTIPLICITY(membr);
+					uint conf_mult = configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)];
+
+					apps=min(apps,conf_mult/rule_mult);
+
+				}
+				//Update applications and configurations
+				nb[D_NB_IDX(block)]+=apps;
+				for (int o=o_init; o < o_end; o++) {
+					uint obj=lhs.object[o];
+					uint membr=lhs.mmultiplicity[o];
+					uint rule_mult = GET_MULTIPLICITY(membr);
+					configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]-=apps*rule_mult;
+				}
+
+			}
+		}
+		__syncthreads();
+
+	}
+
+
+}
 
 /******************************************************/
 /* Kernel for Phase 2, version 2: attempt for speedup */
@@ -2119,14 +2222,15 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		uint rpsize,
 		uint resize,
 		struct _options options) {
-		
-	uint env=blockIdx.x;
+
+	volatile uint env=blockIdx.x;
 	uint sim=blockIdx.y;
 	uint block=threadIdx.x;
 	uint besize=options.num_blocks_env+options.num_rule_blocks;
 	uint block_chunks=(besize + blockDim.x -1)>>CU_LOG_THREADS;
-	
+
 	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
+
 		block=bchunk*blockDim.x+threadIdx.x;
 		
 		if (block >= besize) break;
@@ -2177,7 +2281,7 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 
 				if (!IS_ENVIRONMENT(membr))
 					nr[D_NR_P_IDX(r)] = val;
-				else 
+				else
 					nr[D_NR_E_IDX(r)] = val;
 
 				N-=val;
