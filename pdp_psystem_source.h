@@ -68,6 +68,11 @@ struct _options{
 
 	//After how many steps will the errors be brought from gpu
 	int error_cycle;
+
+	//Micro DCBA params
+	bool micro;
+	int num_partitions;
+
 };
 
 typedef struct _options * Options;

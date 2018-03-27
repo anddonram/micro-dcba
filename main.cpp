@@ -80,10 +80,11 @@ int main (int argc, char* argv[]) {
 	options->output_filter=NULL;
 	options->fast=false;
 	options->error_cycle=1;
+	options->micro=false;
 	//By default, errors are brought each the cycle of steps, along with the configuration data
 	bool error_with_common_cycle=true;
 	// TODO: use getopt_long function to support arguments of type "--blocks"
-	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:dE:")) != -1) {
+	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:dE:i")) != -1) {
 		switch (c) {
 		/* For randomly generated system */
 		case 'R':
@@ -150,6 +151,9 @@ int main (int argc, char* argv[]) {
 			/*if (mode >= 0 && mode <= 5)
 				break;
 			cout << "Incorrect mode: " << mode << endl;*/
+		case 'i':
+			options->micro=true;
+			break;
 		case 'M':
 			par=atoi(optarg);
 			break;
@@ -175,6 +179,7 @@ int main (int argc, char* argv[]) {
 					" -t: time steps" << endl <<
 					" -c: steps per cycle of model" << endl <<
 					" -E: steps per cycle of error data retrieval. If not specified, defaults to steps per cycle of model." << endl <<
+					" -i: Use micro-DCBA version for GPU. Experimental feature" << endl <<
 					" -I: select the implementation: " << endl <<
 					"     -> 0 for OpenMP simulator (default). For a multicore parallel execution, execute 'export OMP_NUM_THREADS=X' on the terminal (X should be the number of processors - 1 for best performance)," << endl <<
 					"     -> 1 for GPU simulator. It requires to have a CUDA capable GPU on the system, with compute capability 5.0 or later." << endl <<

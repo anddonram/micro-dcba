@@ -714,20 +714,39 @@ int normalize_partition(int* partition, int* trans_partition,int size){
 }
 void initialize_partition_structures(int* partition,
 		int num_partitions,
-		int* rules_size,
 		int num_rules,
-		int *lhs_object){
+		int** accum_offsets,
+		int** ordered){
 
-	Options* opt=new Options[num_partitions];
+	uint* offsets=new uint[num_partitions];
+	uint* current_offset=new uint[num_partitions];
 
+	*accum_offsets=new int[num_partitions+1];
+	*ordered=new int[num_rules];
 	for(int i=0;i<num_partitions;i++){
-		//A struct for each partition
-		opt[i]=new struct _options;
+		offsets[i]=0;
+		current_offset[i]=0;
+	}
+
+	for(int i=0;i<num_rules;i++){
+		//Get offsets
+		offsets[partition[i]]++;
+	}
+	(*accum_offsets)[0]=0;
+	for(int i=0;i<num_partitions;i++){
+		//Accumulated offsets
+		(*accum_offsets)[i+1]=(*accum_offsets)[i]+offsets[i];
 	}
 	for(int i=0;i<num_rules;i++){
-		opt[partition[i]]->num_rule_blocks++;
+		int part=partition[i];
+		//Put the rule on its corresponding position
+		(*ordered)[(*accum_offsets)[part]+current_offset[part]]=i;
+		//Advance pointer one unit
+		current_offset[part]++;
 	}
 
+	delete [] current_offset;
+	delete [] offsets;
 }
 
 

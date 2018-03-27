@@ -133,6 +133,11 @@ private:
 	unsigned int *d_output_filter;
 	MULTIPLICITY* output_multiset;
 	MULTIPLICITY* d_output_multiset;
+
+	//Micro-DCBA pointer
+	int* d_partition;
+	int* accum_offset;
+	int* ordered_rules;
 	/*******************************/
 	/* Only for debugging purposes */
 

@@ -315,7 +315,7 @@ PDP_Psystem_REDIX::PDP_Psystem_REDIX(PDP_Psystem_source * source) {
 	/* Finally, process end, and printing system */
 	print();
 
-	print_competition();
+	//print_competition();
 //	for(int i=0;i<options->num_rule_blocks;i++){
 //		print_block_competition(i,false);
 //	}
