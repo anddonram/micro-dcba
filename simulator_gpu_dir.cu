@@ -647,9 +647,11 @@ bool Simulator_gpu_dir::init() {
 					&accum_offset,&ordered_rules
 					);
 
+
 			checkCudaErrors(cudaMalloc((void**)&d_partition,options->num_rule_blocks*sizeof(uint)));
 			checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, options->num_rule_blocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
-			cudaDeviceSynchronize();
+			for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
+
 		}
 
 		delete [] partition;
@@ -744,6 +746,16 @@ void Simulator_gpu_dir::del() {
 	//Deallocate partition for micro
 	if(options->micro){
 		checkCudaErrors(cudaFree(d_partition));
+		delete [] accum_offset;
+		delete [] ordered_rules;
+		cout<<"printmeh"<<endl;
+
+		for (int i = 0; i < NUM_STREAMS; ++i)
+		{
+			cout<<"print"<<endl;
+			cudaStreamDestroy(streams[i]);
+		}
+
 	}
 	checkCudaErrors(cudaStreamDestroy(execution_stream));
 	checkCudaErrors(cudaStreamDestroy(copy_stream));
@@ -1741,19 +1753,19 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 	extern __shared__ uint sData[];
 	//Next b counts the number of blocks
-	uint part_size=part_end-part_init;
+	volatile uint part_size=part_end-part_init;
 	//BDim is num_environments?
-	uint bdim = blockDim.x;
+	volatile uint bdim = blockDim.x;
 	//Activation bit vectors?
-	uint * s_abv = sData;
+	volatile uint * s_abv = sData;
 	//Rule order
 	uint * s_blocks = sData+CU_THREADS;
 	//Active blocks per partition
 	__shared__ uint s_next;
 
-	uint env=blockIdx.x;
-	uint sim=blockIdx.y;
-	uint block=threadIdx.x;
+	volatile uint env=blockIdx.x;
+	volatile uint sim=blockIdx.y;
+	volatile uint block=threadIdx.x;
 
 	//Num of ruleblocks and communication rules
 	//At most, only num_rule_blocks
@@ -1761,7 +1773,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 	//Environment size
 	uint esize=options.num_objects*options.num_membranes;
 	//Membrane size
-	uint msize=options.num_objects;
+	volatile uint msize=options.num_objects;
 	uint asize=(besize>>ABV_LOG_WORD_SIZE) + 1;
 
 	uint part_chunks=((part_size) + bdim - 1)>>CU_LOG_THREADS;
@@ -1773,7 +1785,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 			s_next=0;
 		}
 
-		int block_idx=bchunk*bdim+threadIdx.x;
+		volatile int block_idx=bchunk*bdim+threadIdx.x;
 
 
 		if(block_idx>=part_size)continue;
@@ -1812,7 +1824,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 
 		uint o_init,o_end;
-		int available_rules=s_next;
+		volatile int available_rules=s_next;
 
 		for(int i=0;i<available_rules;i++){
 			uint apps=UINT_MAX;
@@ -1823,11 +1835,15 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 			o_init=ruleblock.lhs_idx[next_block];
 			o_end=ruleblock.lhs_idx[next_block+1];
 
+			uint obj;
+			uint membr;
+			uint rule_mult;
+
 			//Get minimum applications
 			for (int o=o_init; o < o_end; o++) {
-				uint obj=lhs.object[o];
-				uint membr=lhs.mmultiplicity[o];
-				uint rule_mult = GET_MULTIPLICITY(membr);
+				obj=lhs.object[o];
+				membr=lhs.mmultiplicity[o];
+				rule_mult = GET_MULTIPLICITY(membr);
 				uint conf_mult = configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)];
 
 				apps=min(apps,conf_mult/rule_mult);
@@ -1840,12 +1856,20 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 			//printf("Rule %u Applications: %u\n",next_block,apps);
 			for (int o=o_init; o < o_end; o++) {
-				uint obj=lhs.object[o];
-				uint membr=lhs.mmultiplicity[o];
-				uint rule_mult = GET_MULTIPLICITY(membr);
-				configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]-=apps*rule_mult;
-			}
+				obj=lhs.object[o];
+				membr=lhs.mmultiplicity[o];
+				rule_mult = GET_MULTIPLICITY(membr);
 
+//				Check if new multiplicity is valid (>0)
+//				If substracting an uint results in a bigger number, then it was negative
+//				if(configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]
+//						  <configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]-apps*rule_mult)
+//									printf("meeh. error on phase 2 micro-v2");
+
+				configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]-=apps*rule_mult;
+
+
+			}
 
 		}
 		__syncthreads();
@@ -1854,6 +1878,8 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 
 }
+//Deprecated
+//Also not working
 __global__ void kernel_phase2_partition(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::Configuration configuration,
 		PDP_Psystem_REDIX::Lhs lhs,
@@ -2228,19 +2254,32 @@ bool Simulator_gpu_dir::selection_phase2(){
 		cudaStreamSynchronize(execution_stream);
 		getLastCudaError("pre kernel for phase 2 micro launch failure");
 
+		int stream_to_go=0;
+
 		for(int i=0;i<options->num_partitions;i++){
-			kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
+			if(accum_offset[i+1]- accum_offset[i]>=cu_threads){
+				//Large partition
+			}else{
+				//Small partition, accumulate parts
+			}
+			kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
 					d_structures->configuration, d_structures->lhs, d_structures->nb,
 					d_structures->nr, *options, d_abv,
 					d_partition,
 					accum_offset[i],
 					accum_offset[i+1]);
+
+			stream_to_go++;
+			if(stream_to_go==NUM_STREAMS)
+				stream_to_go=0;
 		}
 //		kernel_phase2_partition <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 //			d_structures->configuration, d_structures->lhs, d_structures->nb,
 //			d_structures->nr, *options, d_abv,
 //			d_partition);
-		cudaStreamSynchronize(execution_stream);
+		for(int i=0;i<NUM_STREAMS;i++){
+			cudaStreamSynchronize(streams[i]);
+		}
 		getLastCudaError("kernel for phase 2 micro launch failure");
 
 	}else{

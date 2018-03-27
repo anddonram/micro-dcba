@@ -134,10 +134,13 @@ private:
 	MULTIPLICITY* output_multiset;
 	MULTIPLICITY* d_output_multiset;
 
-	//Micro-DCBA pointer
+	//Micro-DCBA elements
 	int* d_partition;
 	int* accum_offset;
 	int* ordered_rules;
+
+	#define NUM_STREAMS 8
+	cudaStream_t streams[NUM_STREAMS];
 	/*******************************/
 	/* Only for debugging purposes */
 
