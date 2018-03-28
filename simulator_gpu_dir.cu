@@ -1754,12 +1754,12 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 	extern __shared__ uint sData[];
 	//Next b counts the number of blocks
 	volatile uint part_size=part_end-part_init;
-	//BDim is num_environments?
+	//BDim is num threads
 	volatile uint bdim = blockDim.x;
-	//Activation bit vectors?
-	volatile uint * s_abv = sData;
+	//Activation bit vectors: useless because only accessed once
+	//volatile uint * s_abv = sData;
 	//Rule order
-	uint * s_blocks = sData+CU_THREADS;
+	uint * s_blocks = sData;
 	//Active blocks per partition
 	__shared__ uint s_next;
 
@@ -1797,19 +1797,24 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 //											 env*asize+
 //											 ((block%CU_THREADS)>>ABV_LOG_WORD_SIZE));
 
-		s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+
-							 env*asize+
-							 ((block%CU_THREADS)>>ABV_LOG_WORD_SIZE)];
-
-		__syncthreads();
+		//Why shared memory if only used once?
+//		s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+
+//							 env*asize+
+//							 ((block%CU_THREADS)>>ABV_LOG_WORD_SIZE)];
+//
+//		__syncthreads();
 
 //		if (block < options.num_rule_blocks){
 //			printf("%u %#x %d\n ",threadIdx.x,s_abv[threadIdx.x],d_is_active(threadIdx.x,s_abv));
 //		}
+
 		//Custom activation index
 		//Access abv index threadIdx.x, but use block%CU_THREADS module
 		if (block < part_size &&
-				(s_abv[threadIdx.x>>ABV_LOG_WORD_SIZE]
+				(d_abv[sim*options.num_environments*asize+
+											 env*asize+
+											 ((block%CU_THREADS)>>ABV_LOG_WORD_SIZE)]
+				//(s_abv[threadIdx.x>>ABV_LOG_WORD_SIZE]
 							               >> ((~block%CU_THREADS)&ABV_DESPL_MASK))
 							        & 0x1) {
 			s_blocks[atomicInc(&s_next,bdim+2)]=block;
@@ -1878,133 +1883,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 
 }
-//Deprecated
-//Also not working
-__global__ void kernel_phase2_partition(PDP_Psystem_REDIX::Ruleblock ruleblock,
-		PDP_Psystem_REDIX::Configuration configuration,
-		PDP_Psystem_REDIX::Lhs lhs,
-		PDP_Psystem_REDIX::NR nb,
-		PDP_Psystem_REDIX::NR nr,
-		struct _options options,
-		uint * d_abv,
-		int *partition) {
 
-	extern __shared__ uint sData[];
-	//Next b counts the number of blocks
-
-	//BDim is num_environments?
-	uint bdim = blockDim.x;
-	//Activation bit vectors?
-	uint * s_abv = sData;
-	//Rule order
-	uint * s_blocks = sData+(bdim >> ABV_LOG_WORD_SIZE);
-	//Active blocks per partition
-	uint * s_active_blocks_per_partition=s_blocks+bdim;
-
-	uint env=blockIdx.x;
-	uint sim=blockIdx.y;
-	uint block=threadIdx.x;
-
-	//Num of ruleblocks and communication rules
-	//At most, only num_rule_blocks
-	uint besize=options.num_blocks_env+options.num_rule_blocks;
-	//Environment size
-	uint esize=options.num_objects*options.num_membranes;
-	//Membrane size
-	uint msize=options.num_objects;
-	uint asize=(besize>>ABV_LOG_WORD_SIZE) + 1;
-	uint block_chunks=(options.num_rule_blocks + bdim - 1)>>CU_LOG_THREADS;
-
-	uint partition_chunks=(options.num_partitions + bdim - 1)>>CU_LOG_THREADS;
-
-
-	//Iterate rule blocks
-	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
-
-		//Reset partition orders
-		for (int pchunk=0; pchunk < partition_chunks; pchunk++) {
-			uint pblock=pchunk*bdim+threadIdx.x;
-			if(pblock<options.num_partitions){
-				s_active_blocks_per_partition[pblock]=0;
-			}
-		}
-		__syncthreads();
-		block=bchunk*bdim+threadIdx.x;
-
-		//Get activation bit vectors
-		if (threadIdx.x < (bdim>>ABV_LOG_WORD_SIZE)
-			&& threadIdx.x < asize-((bchunk*bdim)>>ABV_LOG_WORD_SIZE)) {
-			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*bdim)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
-
-		}
-		__syncthreads();
-
-//		if (block < options.num_rule_blocks){
-//			printf("%u %#x %d\n ",threadIdx.x,s_abv[threadIdx.x],d_is_active(threadIdx.x,s_abv));
-//		}
-
-		if (block < options.num_rule_blocks && d_is_active(threadIdx.x,s_abv)) {
-			s_blocks[atomicInc((s_active_blocks_per_partition+partition[block]),options.num_partitions+2)]=block;
-		}
-		__syncthreads();
-
-
-		//Each partition in parallel:
-		//1. iterate rules in random order
-		//2. for each rule, calculate minimum applications
-		//3. for each rule, update applications and configurations
-
-		for (int pchunk=0; pchunk < partition_chunks; pchunk++) {
-			uint pblock=pchunk*bdim+threadIdx.x;
-			if(pblock<options.num_partitions){
-
-				//printf("%u Blocks for partition %u\n",s_active_blocks_per_partition[pblock],pblock);
-				uint o_init,o_end;
-				uint available_rules=s_active_blocks_per_partition[pblock];
-
-				for(int i=0;i<available_rules;i++){
-					uint apps=UINT_MAX;
-
-					uint next_block=s_blocks[i];
-
-					//Indexes and lhs lengths
-					o_init=ruleblock.lhs_idx[next_block];
-					o_end=ruleblock.lhs_idx[next_block+1];
-
-					//Get minimum applications
-					for (int o=o_init; o < o_end; o++) {
-						uint obj=lhs.object[o];
-						uint membr=lhs.mmultiplicity[o];
-						uint rule_mult = GET_MULTIPLICITY(membr);
-						uint conf_mult = configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)];
-
-						apps=min(apps,conf_mult/rule_mult);
-
-					}
-					//Update applications and configurations
-					if(apps==0)continue;
-
-					nb[D_NB_IDX(next_block)]+=apps;
-
-					//printf("Rule %u Applications: %u\n",next_block,apps);
-					for (int o=o_init; o < o_end; o++) {
-						uint obj=lhs.object[o];
-						uint membr=lhs.mmultiplicity[o];
-						uint rule_mult = GET_MULTIPLICITY(membr);
-						configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]-=apps*rule_mult;
-					}
-
-
-				}
-
-			}
-		}
-		__syncthreads();
-
-	}
-
-
-}
 
 /******************************************************/
 /* Kernel for Phase 2, version 2: attempt for speedup */
@@ -2249,7 +2128,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 	
 		dim3 dimGrid (cu_blocksx, cu_blocksy);
 		dim3 dimBlock (cu_threads);
-		size_t sh_mem=((cu_threads) + cu_threads)*sizeof(uint);
+		size_t sh_mem=(cu_threads)*sizeof(uint);
 	
 		cudaStreamSynchronize(execution_stream);
 		getLastCudaError("pre kernel for phase 2 micro launch failure");
@@ -2278,10 +2157,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 			if(stream_to_go==NUM_STREAMS)
 				stream_to_go=0;
 		}
-//		kernel_phase2_partition <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
-//			d_structures->configuration, d_structures->lhs, d_structures->nb,
-//			d_structures->nr, *options, d_abv,
-//			d_partition);
+
 		for(int i=0;i<NUM_STREAMS;i++){
 			cudaStreamSynchronize(streams[i]);
 		}
