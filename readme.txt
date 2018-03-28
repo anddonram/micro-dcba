@@ -48,7 +48,7 @@ Type ./abcdgpu -h to list the different options. In this version, input files of
 * A profiling execution (CPU vs GPU) for the Bearded Vulture model (in plingua folder, previously generated from the .pli file), using 1000 simulations, 42 steps, 3 steps per cycle, verbosity 1: ./abcdgpu -f plingua/bv_model_bwmc12.bin -s 1000 -t 42 -I 1 -M 1 -v 1 -c 3
 * A simulation of the Bearded Vulture model on the GPU using 100 simulations, 42 steps, 3 steps per cycle, verbosity 1, and the output of a csv (which will be named after the input file plus the extension of .csv): ./abcdgpu -f plingua/bv_model_bwmc12.bin -I 1 -s 100 -t 42 -v 1 -c 3 -O 0
 * A debug example parameters: -f plingua/bv_model_bwmc12.bin -I 1 -s 64 -t 18 -c 6
-* A micro-DCBA testing example parameters: f plingua/bv_model_bwmc12.bin -I 1 -s 1 -t 1 -i
+* A micro-DCBA testing example parameters: -f plingua/bv_model_bwmc12.bin -I 1 -s 1 -t 1 -i
 
 
 IV. Source:

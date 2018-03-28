@@ -1778,17 +1778,16 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 	uint part_chunks=((part_size) + bdim - 1)>>CU_LOG_THREADS;
 
+	if(threadIdx.x==0){
+		s_next=0;
+	}
+	__syncthreads();
 
 	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
 
-		if(threadIdx.x==0){
-			s_next=0;
-		}
-
 		volatile int block_idx=bchunk*bdim+threadIdx.x;
 
-
-		if(block_idx>=part_size)continue;
+		if(block_idx>=part_size)break;
 
 		block=ordered_rules[block_idx+part_init];
 		//Get activation bit vectors
@@ -1872,6 +1871,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 			}
 
 		}
+		s_next=0;
 		__syncthreads();
 
 	}
@@ -2257,7 +2257,12 @@ bool Simulator_gpu_dir::selection_phase2(){
 		int stream_to_go=0;
 
 		for(int i=0;i<options->num_partitions;i++){
-			if(accum_offset[i+1]- accum_offset[i]>=cu_threads){
+			int part_size=accum_offset[i+1]- accum_offset[i];
+			//If a rule has no competition, then it must have been applied as many times as possible,
+			//so there is no point in launching a kernel
+			if(part_size==1) continue;
+
+			if(part_size>=cu_threads){
 				//Large partition
 			}else{
 				//Small partition, accumulate parts
