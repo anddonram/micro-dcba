@@ -712,7 +712,7 @@ int normalize_partition(int* partition, int* trans_partition,int size){
 
 	return part_index;
 }
-void initialize_partition_structures(int* partition,
+int initialize_partition_structures(int* partition,
 		int num_partitions,
 		int num_rules,
 		int** accum_offsets,
@@ -722,7 +722,12 @@ void initialize_partition_structures(int* partition,
 	uint* current_offset=new uint[num_partitions];
 
 	*accum_offsets=new int[num_partitions+1];
-	*ordered=new int[num_rules];
+	int *expanded_accum_offsets=new int[num_partitions+1];
+
+	//Parts with only one ruleblock
+	int unique_blocks=0;
+
+	//Initialize
 	for(int i=0;i<num_partitions;i++){
 		offsets[i]=0;
 		current_offset[i]=0;
@@ -732,21 +737,57 @@ void initialize_partition_structures(int* partition,
 		//Get offsets
 		offsets[partition[i]]++;
 	}
+
+	//Inclusive scan
 	(*accum_offsets)[0]=0;
+	expanded_accum_offsets[0]=0;
+	int compact_index=0;
 	for(int i=0;i<num_partitions;i++){
 		//Accumulated offsets
-		(*accum_offsets)[i+1]=(*accum_offsets)[i]+offsets[i];
+		int val=0;
+		if(offsets[i]!=1){
+			val=offsets[i];
+			(*accum_offsets)[compact_index+1]=(*accum_offsets)[compact_index]+val;
+			compact_index++;
+		}else{
+			unique_blocks++;
+		}
+		expanded_accum_offsets[i+1]=expanded_accum_offsets[i]+val;
 	}
+
+	//Sort rules
+	*ordered=new int[num_rules-unique_blocks];
 	for(int i=0;i<num_rules;i++){
 		int part=partition[i];
+		if(offsets[part]==1)continue;
 		//Put the rule on its corresponding position
-		(*ordered)[(*accum_offsets)[part]+current_offset[part]]=i;
+		(*ordered)[expanded_accum_offsets[part]+current_offset[part]]=i;
 		//Advance pointer one unit
 		current_offset[part]++;
 	}
 
+	//Print for debugging purposes
+//	std::cout<< "partitions" <<std::endl;
+//	for(int i=0;i<num_rules;i++){
+//		std::cout<<partition[i] <<std::endl;
+//	}
+//	std::cout<< "offset" <<std::endl;
+//	for(int i=0;i<num_partitions;i++){
+//		std::cout<<offsets[i] <<std::endl;
+//	}
+//	std::cout<< "accum" <<std::endl;
+//	for(int i=0;i<num_partitions+1;i++){
+//		std::cout<<(*accum_offsets)[i] <<std::endl;
+//	}
+//	std::cout<< "ordered " << unique_blocks <<std::endl;
+//	for(int i=0;i<num_rules-unique_blocks;i++){
+//		std::cout<<(*ordered)[i] <<std::endl;
+//	}
 	delete [] current_offset;
+	delete [] expanded_accum_offsets;
 	delete [] offsets;
+
+	return unique_blocks;
 }
 
 

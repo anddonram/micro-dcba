@@ -641,15 +641,15 @@ bool Simulator_gpu_dir::init() {
 			cout << "Full competition, disabling micro-DCBA..." << endl;
 		}
 		else{
-
-			competition::initialize_partition_structures(trans_partition,
+			int independent_ruleblocks=competition::initialize_partition_structures(trans_partition,
 					options->num_partitions,options->num_rule_blocks,
 					&accum_offset,&ordered_rules
 					);
 
-
-			checkCudaErrors(cudaMalloc((void**)&d_partition,options->num_rule_blocks*sizeof(uint)));
-			checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, options->num_rule_blocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
+			options->num_partitions-=independent_ruleblocks;
+			int dependent_ruleblocks=options->num_rule_blocks-independent_ruleblocks;
+			checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
+			checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
 			for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
 
 		}
@@ -2134,28 +2134,71 @@ bool Simulator_gpu_dir::selection_phase2(){
 		getLastCudaError("pre kernel for phase 2 micro launch failure");
 
 		int stream_to_go=0;
+		int start_partition=0;
+		//Accumulated size
+		int partition_size=0;
 
+		//Trick:If a rule has no competition, then it must have been applied as many times as possible,
+		//so there is no point in launching a kernel
 		for(int i=0;i<options->num_partitions;i++){
-			int part_size=accum_offset[i+1]- accum_offset[i];
-			//If a rule has no competition, then it must have been applied as many times as possible,
-			//so there is no point in launching a kernel
-			if(part_size==1) continue;
+			int part_size=accum_offset[i+1] - accum_offset[i];
+
+//			cout<<"start_partition "<<start_partition<< endl;
+//			cout<<"part_size (accumulated) "<<partition_size <<endl;
+//			cout<<"part_size "<<part_size <<endl;
 
 			if(part_size>=cu_threads){
-				//Large partition
+				if(start_partition!=i){
+					//there was something already accumulated, launch it
+					kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
+							d_structures->configuration, d_structures->lhs, d_structures->nb,
+							d_structures->nr, *options, d_abv,
+							d_partition,
+							accum_offset[start_partition],
+							accum_offset[i]);
+
+					stream_to_go++;
+					if(stream_to_go==NUM_STREAMS)
+						stream_to_go=0;
+
+				}
+
+				//Large partition, launch independently
+				kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
+						d_structures->configuration, d_structures->lhs, d_structures->nb,
+						d_structures->nr, *options, d_abv,
+						d_partition,
+						accum_offset[i],
+						accum_offset[i+1]);
+
+				stream_to_go++;
+				if(stream_to_go==NUM_STREAMS)
+					stream_to_go=0;
+				start_partition=i+1;
+				partition_size=0;
 			}else{
 				//Small partition, accumulate parts
-			}
-			kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
-					d_structures->configuration, d_structures->lhs, d_structures->nb,
-					d_structures->nr, *options, d_abv,
-					d_partition,
-					accum_offset[i],
-					accum_offset[i+1]);
+				if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
+					//Enough accumulate (or last iteration), launch
+					kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
+							d_structures->configuration, d_structures->lhs, d_structures->nb,
+							d_structures->nr, *options, d_abv,
+							d_partition,
+							accum_offset[start_partition],
+							accum_offset[i+1]);
 
-			stream_to_go++;
-			if(stream_to_go==NUM_STREAMS)
-				stream_to_go=0;
+					stream_to_go++;
+					if(stream_to_go==NUM_STREAMS)
+						stream_to_go=0;
+					start_partition=i+1;
+					partition_size=0;
+				}else{
+					//Accumulate
+					partition_size+=part_size;
+
+				}
+			}
+
 		}
 
 		for(int i=0;i<NUM_STREAMS;i++){

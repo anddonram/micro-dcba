@@ -45,7 +45,7 @@ bool check_compete(int block_a,int block_b,unsigned int* rules_size,unsigned int
 
 void compare_partition(int* partition, int* alphabet,int* partition2, int* alphabet2,int num_rules,int num_objects);
 int normalize_partition(int* partition, int* trans_partition,int size);
-void initialize_partition_structures(int* partition,
+int initialize_partition_structures(int* partition,
 		int num_partitions,
 		int num_rules,
 		int** accum_offsets,
