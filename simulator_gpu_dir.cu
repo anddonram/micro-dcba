@@ -1103,7 +1103,7 @@ __global__ void kernel_phase1_normalization(
 		// If the block is activated
 		if (d_is_active(threadIdx.x,s_abv)) {
 			min=UINT_MAX;
-                        uint o_init=ruleblock.lhs_idx[block];
+            uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
 			for (int o=o_init; o < o_end; o++) {
 				uint obj=lhs.object[o];
@@ -1196,7 +1196,7 @@ __global__ void kernel_phase1_normalization_acu (
 	/* Normalization - step 2 *
 	 * Column minimum calculation */
 	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
-                uint min=0;
+        uint min=0;
 		
 		block=bchunk*blockDim.x+threadIdx.x;
 		//if (block >= besize) break;
@@ -1210,8 +1210,9 @@ __global__ void kernel_phase1_normalization_acu (
 		// If the block is active
 		if ((block < besize) && d_is_active(threadIdx.x,s_abv)) {
 			min=UINT_MAX;
-                        uint o_init=ruleblock.lhs_idx[block];
+            uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
+
 			for (int o=o_init; o < o_end; o++) {
 				uint obj=lhs.object[o];
 				uint membr=lhs.mmultiplicity[o];
@@ -1753,9 +1754,9 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 	extern __shared__ uint sData[];
 	//Next b counts the number of blocks
-	volatile uint part_size=part_end-part_init;
+	uint part_size=part_end-part_init;
 	//BDim is num threads
-	volatile uint bdim = blockDim.x;
+	uint bdim = blockDim.x;
 	//Activation bit vectors: useless because only accessed once
 	//volatile uint * s_abv = sData;
 	//Rule order
@@ -1763,9 +1764,9 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 	//Active blocks per partition
 	__shared__ uint s_next;
 
-	volatile uint env=blockIdx.x;
-	volatile uint sim=blockIdx.y;
-	volatile uint block=threadIdx.x;
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint block=threadIdx.x;
 
 	//Num of ruleblocks and communication rules
 	//At most, only num_rule_blocks
@@ -1773,7 +1774,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 	//Environment size
 	uint esize=options.num_objects*options.num_membranes;
 	//Membrane size
-	volatile uint msize=options.num_objects;
+	uint msize=options.num_objects;
 	uint asize=(besize>>ABV_LOG_WORD_SIZE) + 1;
 
 	uint part_chunks=((part_size) + bdim - 1)>>CU_LOG_THREADS;
@@ -1785,7 +1786,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
 
-		volatile int block_idx=bchunk*bdim+threadIdx.x;
+		int block_idx=bchunk*bdim+threadIdx.x;
 
 		if(block_idx>=part_size)break;
 
@@ -1828,7 +1829,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 
 		uint o_init,o_end;
-		volatile int available_rules=s_next;
+		int available_rules=s_next;
 
 		for(int i=0;i<available_rules;i++){
 			uint apps=UINT_MAX;
@@ -2446,11 +2447,12 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 			configuration.membrane[D_CH_IDX(GET_MEMBRANE(membr))]=GET_BETA(membr);
 			
 			float cr=0.0f,d=1.0f;
-
-			for (uint r = rule_ini; r < rule_end; r++) {
-				float p=0.0f;
-				uint val=0;
-
+			uint r;
+			float p;
+			uint val=0;
+			//Only n-1 rules, to avoid branching on last
+			for (r = rule_ini; r < rule_end-1; r++) {
+				val=0;
 				if (IS_ENVIRONMENT(membr)) {
 					p=probability[options.num_environments*rpsize+(r-rpsize)];
 				}
@@ -2461,11 +2463,7 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 				cr = fdividef(p,d);
 				
 				if (cr > 0.0f) {
-					if (r == rule_end-1)
-						val=N;
-					else {
-						val=curng_binomial_random (N, cr);
-					}
+					val=curng_binomial_random (N, cr);
 				}
 
 				if (!IS_ENVIRONMENT(membr))
@@ -2476,6 +2474,28 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 				N-=val;
 				d*=(1-cr);
 			}
+
+			//Last rule, to avoid one branch on the loop
+			r=rule_end-1;
+			val=0;
+			if (IS_ENVIRONMENT(membr)) {
+				p=probability[options.num_environments*rpsize+(r-rpsize)];
+			}
+			else {
+				p=probability[env*rpsize+r];
+			}
+
+			cr = fdividef(p,d);
+
+			if (cr > 0.0f) {
+				val=N;
+			}
+			if (!IS_ENVIRONMENT(membr))
+				nr[D_NR_P_IDX(r)] = N;
+			else
+				nr[D_NR_E_IDX(r)] = N;
+
+
 		}
 		__syncthreads();
 	}
