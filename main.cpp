@@ -77,6 +77,7 @@ int main (int argc, char* argv[]) {
 	options->accuracy=2;
 	options->verbose=0;
 	options->debug = false;
+	options->GPU_filter=false;
 	options->output_filter=NULL;
 	options->fast=false;
 	options->error_cycle=1;

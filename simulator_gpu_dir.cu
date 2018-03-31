@@ -70,6 +70,7 @@ using namespace std;
 /************************************************************/
 #define D_AD_IDX(o,m) (sim*options.num_environments*esize+env*esize+(m)*msize+(o))
 #define D_NB_IDX(b) (sim*options.num_environments*besize+env*besize+(b))
+
 #define D_NR_P_IDX(r) (sim*(options.num_environments*rpsize+(resize-rpsize))+env*rpsize+(r))
 #define D_NR_E_IDX(r) (sim*(options.num_environments*rpsize+(resize-rpsize))+options.num_environments*rpsize+((r)-rpsize))
 #define D_CH_IDX(m) (sim*(options.num_environments*options.num_membranes)+env*options.num_membranes+(m))
@@ -90,6 +91,9 @@ using namespace std;
 #define SET_CONF_MULT(obj,mult) (((obj)&0xFFF00000)|((mult)&0xFFFFF))
 #define GET_CONF_MULT(o) (o&0xFFFFF)
 #define GET_MULT(o) ((o>>20)&0x7FF)
+
+//Using constant memory to load as symbols results in no real gain (nor loss)
+//__constant__ _options d_options;
 
 /***************************************************************************/
 
@@ -237,6 +241,7 @@ bool safe_u_mul(uint& op1, uint op2) {
 	
 	return false;
 }*/
+
 
 
 //TODO: Make this member to return a boolean value, to check errors
@@ -659,6 +664,9 @@ bool Simulator_gpu_dir::init() {
 		delete [] alphabet;
 	}
 
+	//Using constant memory to load as symbols results in no real gain (nor loss)
+	//checkCudaErrors(cudaMemcpyToSymbolAsync(d_options, options, sizeof(_options), 0,cudaMemcpyHostToDevice,copy_stream));
+
 	// Create a timer
 	sdkCreateTimer(&counters.timer);
 
@@ -896,7 +904,7 @@ __global__ void kernel_phase1_filters(
 			struct _options options,
 			uint * d_abv,
 			uint * d_data_error) {
-// TODO: load all next data as symbols
+
 	uint env=blockIdx.x;
 	uint sim=blockIdx.y;
 	uint block=threadIdx.x;
@@ -2411,8 +2419,8 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::Probability probability,
 		uint rpsize,
 		uint resize,
-		struct _options options) {
-
+		struct _options options
+		) {
 	volatile uint env=blockIdx.x;
 	uint sim=blockIdx.y;
 	uint block=threadIdx.x;
@@ -2531,7 +2539,8 @@ bool Simulator_gpu_dir::selection_phase3() {
 	kernel_phase3 <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
 		d_structures->configuration, d_structures->nb, 
 		d_structures->nr, d_structures->probability, d_structures->pi_rule_size,
-		d_structures->pi_rule_size+d_structures->env_rule_size, *options);
+		d_structures->pi_rule_size+d_structures->env_rule_size,*options
+		);
 	 
 
 	if (runcomp) {

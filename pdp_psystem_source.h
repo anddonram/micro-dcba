@@ -61,10 +61,10 @@ struct _options{
 	unsigned int objects_to_output;
 
 	//Whether the output will be filtered in the GPU or the CPU
-	bool GPU_filter=false;
+	bool GPU_filter;
 
 	//Whether the RNG with curand_init (GPU only) will be faster but less accurate.
-	bool fast=false;
+	bool fast;
 
 	//After how many steps will the errors be brought from gpu
 	int error_cycle;
