@@ -1097,7 +1097,7 @@ __global__ void kernel_phase1_normalization(
 	/* Normalization - step 2 *
 	 * Column minimum calculation */
 	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
-                uint min=0;
+        uint min=0;
 		
 		block=bchunk*blockDim.x+threadIdx.x;
 		if (block >= besize) break;
@@ -1179,14 +1179,22 @@ __global__ void kernel_phase1_normalization_acu (
 	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
 		block=bchunk*blockDim.x+threadIdx.x;
 		
-		if ((block < besize) && threadIdx.x < (blockDim.x>>ABV_LOG_WORD_SIZE)
-				&& threadIdx.x < asize-((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)) {
-			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
-		}
+//		if ((block < besize) && threadIdx.x < (blockDim.x>>ABV_LOG_WORD_SIZE)
+//				&& threadIdx.x < asize-((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)) {
+//			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
+//		}
 		__syncthreads();
 		
 		// If the block is activated
-		if ((block < besize) && !d_is_active(threadIdx.x,s_abv)) {
+		//TODO: Check if this must be true or false
+		if ((block < besize) &&
+				!(d_abv[sim*options.num_environments*asize+
+													 env*asize+
+													 ((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+
+													 threadIdx.x]
+									               >> ((~threadIdx.x)&ABV_DESPL_MASK))
+									        & 0x1) {
+			//	!d_is_active(threadIdx.x,s_abv)) {
 			uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
 			for (int o=o_init; o < o_end; o++) {
@@ -1209,14 +1217,21 @@ __global__ void kernel_phase1_normalization_acu (
 		block=bchunk*blockDim.x+threadIdx.x;
 		//if (block >= besize) break;
 
-		if ((block < besize) && threadIdx.x < (blockDim.x>>ABV_LOG_WORD_SIZE)
-				&& threadIdx.x < asize-((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)) {
-			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
-		}
+//		if ((block < besize) && threadIdx.x < (blockDim.x>>ABV_LOG_WORD_SIZE)
+//				&& threadIdx.x < asize-((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)) {
+//			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
+//		}
 		__syncthreads();
 		
 		// If the block is active
-		if ((block < besize) && d_is_active(threadIdx.x,s_abv)) {
+		if ((block < besize) &&
+			(d_abv[sim*options.num_environments*asize+
+						 env*asize+
+						 ((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+
+						 threadIdx.x]
+					   >> ((~threadIdx.x)&ABV_DESPL_MASK))
+				& 0x1) {
+				//d_is_active(threadIdx.x,s_abv)) {
 			min=UINT_MAX;
             uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
@@ -1819,12 +1834,13 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 
 		//Custom activation index
 		//Access abv index threadIdx.x, but use block%CU_THREADS module
+		uint bidx=(block%bdim);
 		if (block < part_size &&
 				(d_abv[sim*options.num_environments*asize+
 											 env*asize+
-											 ((block%CU_THREADS)>>ABV_LOG_WORD_SIZE)]
-				//(s_abv[threadIdx.x>>ABV_LOG_WORD_SIZE]
-							               >> ((~block%CU_THREADS)&ABV_DESPL_MASK))
+											 ((block-bidx)>>ABV_LOG_WORD_SIZE)+
+											 bidx]
+							               >> ((~bidx)&ABV_DESPL_MASK))
 							        & 0x1) {
 			s_blocks[atomicInc(&s_next,bdim+2)]=block;
 		}
@@ -1877,7 +1893,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 //				If substracting an uint results in a bigger number, then it was negative
 //				if(configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]
 //						  <configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]-apps*rule_mult)
-//									printf("meeh. error on phase 2 micro-v2");
+//									printf("error on phase 2 micro-v2: rule %u \n",next_block);
 
 				configuration.multiset[D_MU_IDX(GET_OBJECT(obj),0)]-=apps*rule_mult;
 
@@ -2499,9 +2515,9 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 				val=N;
 			}
 			if (!IS_ENVIRONMENT(membr))
-				nr[D_NR_P_IDX(r)] = N;
+				nr[D_NR_P_IDX(r)] = val;
 			else
-				nr[D_NR_E_IDX(r)] = N;
+				nr[D_NR_E_IDX(r)] = val;
 
 
 		}
