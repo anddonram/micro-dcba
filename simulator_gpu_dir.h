@@ -139,6 +139,7 @@ private:
 	int* accum_offset;
 	int* ordered_rules;
 
+
 	#define NUM_STREAMS 8
 	cudaStream_t streams[NUM_STREAMS];
 	/*******************************/

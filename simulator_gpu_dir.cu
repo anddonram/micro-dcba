@@ -93,7 +93,8 @@ using namespace std;
 #define GET_MULT(o) ((o>>20)&0x7FF)
 
 //Using constant memory to load as symbols results in no real gain (nor loss)
-//__constant__ _options d_options;
+__constant__ _options d_options;
+__constant__ _computations d_computations;
 
 /***************************************************************************/
 
@@ -665,8 +666,19 @@ bool Simulator_gpu_dir::init() {
 	}
 
 	//Using constant memory to load as symbols results in no real gain (nor loss)
-	//checkCudaErrors(cudaMemcpyToSymbolAsync(d_options, options, sizeof(_options), 0,cudaMemcpyHostToDevice,copy_stream));
+	checkCudaErrors(cudaMemcpyToSymbolAsync(d_options, options, sizeof(_options),size_t(0),cudaMemcpyHostToDevice,copy_stream));
 
+	_computations* computations;
+	computations=new _computations;
+	computations->besize=options->num_blocks_env+options->num_rule_blocks;
+	computations->esize=options->num_objects*options->num_membranes;
+	computations->msize=options->num_objects;
+	computations->asize=(besize>>ABV_LOG_WORD_SIZE) + 1;
+	computations->block_chunks=(besize + CU_THREADS -1)>>CU_LOG_THREADS;
+	computations->rpsize=structures->pi_rule_size;
+	computations->resize=structures->pi_rule_size+structures->env_rule_size;
+
+	checkCudaErrors(cudaMemcpyToSymbolAsync(d_computations, computations, sizeof(_computations), size_t(0),cudaMemcpyHostToDevice,copy_stream));
 	// Create a timer
 	sdkCreateTimer(&counters.timer);
 
@@ -1075,6 +1087,9 @@ __global__ void kernel_phase1_normalization(
 		__syncthreads();
 		
 		// If the block is activated
+//		if((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
+//			        >> ((~threadIdx.x)&ABV_DESPL_MASK))
+//					& 0x1) {
 		if (d_is_active(threadIdx.x,s_abv)) {
 			uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
@@ -1109,6 +1124,9 @@ __global__ void kernel_phase1_normalization(
 		__syncthreads();
 		
 		// If the block is activated
+//		if((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
+//			        >> ((~threadIdx.x)&ABV_DESPL_MASK))
+//					& 0x1) {
 		if (d_is_active(threadIdx.x,s_abv)) {
 			min=UINT_MAX;
             uint o_init=ruleblock.lhs_idx[block];
@@ -1179,22 +1197,20 @@ __global__ void kernel_phase1_normalization_acu (
 	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
 		block=bchunk*blockDim.x+threadIdx.x;
 		
-//		if ((block < besize) && threadIdx.x < (blockDim.x>>ABV_LOG_WORD_SIZE)
-//				&& threadIdx.x < asize-((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)) {
-//			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
-//		}
+		if ((block < besize) && threadIdx.x < (blockDim.x>>ABV_LOG_WORD_SIZE)
+				&& threadIdx.x < asize-((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)) {
+			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
+		}
 		__syncthreads();
-		
+
+
 		// If the block is activated
 		//TODO: Check if this must be true or false
 		if ((block < besize) &&
-				!(d_abv[sim*options.num_environments*asize+
-													 env*asize+
-													 ((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+
-													 threadIdx.x]
-									               >> ((~threadIdx.x)&ABV_DESPL_MASK))
-									        & 0x1) {
-			//	!d_is_active(threadIdx.x,s_abv)) {
+//				!((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
+//					        >> ((~threadIdx.x)&ABV_DESPL_MASK))
+//							& 0x1)) {
+				!d_is_active(threadIdx.x,s_abv)) {
 			uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
 			for (int o=o_init; o < o_end; o++) {
@@ -1217,21 +1233,18 @@ __global__ void kernel_phase1_normalization_acu (
 		block=bchunk*blockDim.x+threadIdx.x;
 		//if (block >= besize) break;
 
-//		if ((block < besize) && threadIdx.x < (blockDim.x>>ABV_LOG_WORD_SIZE)
-//				&& threadIdx.x < asize-((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)) {
-//			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
-//		}
+		if ((block < besize) && threadIdx.x < (blockDim.x>>ABV_LOG_WORD_SIZE)
+				&& threadIdx.x < asize-((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)) {
+			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
+		}
 		__syncthreads();
 		
 		// If the block is active
 		if ((block < besize) &&
-			(d_abv[sim*options.num_environments*asize+
-						 env*asize+
-						 ((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+
-						 threadIdx.x]
-					   >> ((~threadIdx.x)&ABV_DESPL_MASK))
-				& 0x1) {
-				//d_is_active(threadIdx.x,s_abv)) {
+//				((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
+//									        >> ((~threadIdx.x)&ABV_DESPL_MASK))
+//											& 0x1)) {
+				d_is_active(threadIdx.x,s_abv)) {
 			min=UINT_MAX;
             uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
@@ -1296,7 +1309,7 @@ __global__ void kernel_phase1_update(
             if (!block_sel) block_sel=true;
 			
 			/* Consume LHS */
-                        uint o_init=ruleblock.lhs_idx[block];
+            uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
 			for (int o=o_init; o < o_end; o++) {
 				uint obj=lhs.object[o];
@@ -1331,7 +1344,7 @@ __global__ void kernel_phase1_update(
 			s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+env*asize+((bchunk*blockDim.x)>>ABV_LOG_WORD_SIZE)+threadIdx.x];
 		}
 		__syncthreads();
-		
+
 		if (d_is_active(threadIdx.x,s_abv)) {
 			// Using new registers avoid memory accesses on the for loop
 			uint o_init=ruleblock.lhs_idx[block];
@@ -1764,7 +1777,7 @@ __global__ void kernel_phase2_generic(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		//       compute next s_blocks
 	}
 }
-__global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
+__global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::Configuration configuration,
 		PDP_Psystem_REDIX::Lhs lhs,
 		PDP_Psystem_REDIX::NR nb,
@@ -1838,8 +1851,7 @@ __global__ void kernel_phase2_partition_v2(PDP_Psystem_REDIX::Ruleblock rulebloc
 		if (block < part_size &&
 				(d_abv[sim*options.num_environments*asize+
 											 env*asize+
-											 ((block-bidx)>>ABV_LOG_WORD_SIZE)+
-											 bidx]
+											 (block>>ABV_LOG_WORD_SIZE)]
 							               >> ((~bidx)&ABV_DESPL_MASK))
 							        & 0x1) {
 			s_blocks[atomicInc(&s_next,bdim+2)]=block;
@@ -2175,7 +2187,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 			if(part_size>=cu_threads){
 				if(start_partition!=i){
 					//there was something already accumulated, launch it
-					kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
+					kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
 							d_structures->configuration, d_structures->lhs, d_structures->nb,
 							d_structures->nr, *options, d_abv,
 							d_partition,
@@ -2189,7 +2201,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 				}
 
 				//Large partition, launch independently
-				kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
+				kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
 						d_structures->configuration, d_structures->lhs, d_structures->nb,
 						d_structures->nr, *options, d_abv,
 						d_partition,
@@ -2205,7 +2217,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 				//Small partition, accumulate parts
 				if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
 					//Enough accumulate (or last iteration), launch
-					kernel_phase2_partition_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
+					kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
 							d_structures->configuration, d_structures->lhs, d_structures->nb,
 							d_structures->nr, *options, d_abv,
 							d_partition,
@@ -2432,16 +2444,19 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::Configuration configuration,
 		PDP_Psystem_REDIX::NR nb,
 		PDP_Psystem_REDIX::NR nr,
-		PDP_Psystem_REDIX::Probability probability,
-		uint rpsize,
-		uint resize,
-		struct _options options
+		PDP_Psystem_REDIX::Probability probability//,
+//		uint rpsize,
+//		uint resize,
+//		struct _options options
 		) {
 	volatile uint env=blockIdx.x;
-	uint sim=blockIdx.y;
-	uint block=threadIdx.x;
-	uint besize=options.num_blocks_env+options.num_rule_blocks;
-	uint block_chunks=(besize + blockDim.x -1)>>CU_LOG_THREADS;
+	volatile uint rpsize=d_computations.rpsize;
+	volatile uint resize=d_computations.resize;
+	volatile _options options=d_options;
+	volatile uint sim=blockIdx.y;
+	volatile uint block=threadIdx.x;
+	volatile uint besize=d_computations.besize;//options.num_blocks_env+options.num_rule_blocks;
+	volatile uint block_chunks=d_computations.block_chunks;//(besize + blockDim.x -1)>>CU_LOG_THREADS;
 
 	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
 
@@ -2464,9 +2479,11 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 					nr[D_NR_P_IDX(r)] = 0;
 				else if (env==GET_ENVIRONMENT(membr))
 					nr[D_NR_E_IDX(r)] = 0;
-			}		 		
+			}
 		}
 		else {
+			//Alternative version along with the memset
+		//if(N>0){
 			// Update charges
 			configuration.membrane[D_CH_IDX(GET_MEMBRANE(membr))]=GET_BETA(membr);
 			
@@ -2552,10 +2569,11 @@ bool Simulator_gpu_dir::selection_phase3() {
 	dim3 dimGrid (cu_blocksx, cu_blocksy);
 	dim3 dimBlock (cu_threads);
 
+	//cudaMemsetAsync(d_structures->nr,0,d_structures->nr_size*sizeof(MULTIPLICITY),execution_stream);
 	kernel_phase3 <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
 		d_structures->configuration, d_structures->nb, 
-		d_structures->nr, d_structures->probability, d_structures->pi_rule_size,
-		d_structures->pi_rule_size+d_structures->env_rule_size,*options
+		d_structures->nr, d_structures->probability//, d_structures->pi_rule_size,
+		//d_structures->pi_rule_size+d_structures->env_rule_size,*options
 		);
 	 
 
@@ -2677,7 +2695,7 @@ __global__ void kernel_phase4 (PDP_Psystem_REDIX::Rule rule,
 	uint esize=options.num_objects*options.num_membranes;
 	uint msize=options.num_objects;
 	uint rp_chunks=(rpsize + blockDim.x -1)>>CU_LOG_THREADS;
-	
+
 	/* Rules of Pi, executed by each environment */
 	for (int rchunk=0; rchunk < rp_chunks; rchunk++) {
 		r=rchunk*blockDim.x+threadIdx.x;

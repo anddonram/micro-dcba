@@ -111,7 +111,34 @@ static inline __device__ unsigned int curng_binomial_binv(unsigned int n, float 
     //x = (p<0.5f)? x : n-x;
     return x;
 }
+//Version from above, but using exclusively floats (reduced register pressure)
+static inline __device__ unsigned int curng_binomial_binv_fast(unsigned int n, float p){
+    unsigned int idx = __IDX;
+    curandStateXORWOW_t localState = curng_binomial_states_k[idx];
+    unsigned int x = 0;
 
+    //float p1 = fmin(p,1.f-p);
+    //Algorithm starts here. (attribute 'x' assigned to '0')
+    float q = 1.f - p;
+    float s = fdividef(p,q);    //Divide floating points
+    float a = (n+1)*s;
+    float r = powf(q,n);        //Pow floating points
+    float u = curand_uniform(&localState);
+    while(u > r){
+        u = u - r;
+        x++;
+        r = (fdividef(a,((float)x)) - s) * r;
+	if (r<=0.0)
+		break;
+    }
+    //Algorithm finishes here.
+    if (x>n)
+	x=n;
+
+    curng_binomial_states_k[idx] = localState;
+    //x = (p<0.5f)? x : n-x;
+    return x;
+}
 /* Normal approximation of binomial distribution: N(np, np(1-p))
  * Condition: n*min(p,1-p) > 30
  * Standardizing normal random variables 
@@ -143,7 +170,7 @@ static inline __device__ unsigned int curng_binomial_random(unsigned int n, floa
     else */
 
     if (n*fmin(p,1.0f-p) < 10)
-        k = curng_binomial_binv(n,p);
+        k = curng_binomial_binv_fast(n,p);
     else{
         k = curng_binomial_norm(n,p);
     }

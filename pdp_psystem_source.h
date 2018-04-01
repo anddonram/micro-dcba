@@ -74,7 +74,15 @@ struct _options{
 	int num_partitions;
 
 };
-
+struct _computations{
+	unsigned int besize;//=options.num_blocks_env+options.num_rule_blocks;
+	unsigned int esize;//=options.num_objects*options.num_membranes;
+	unsigned int msize;//=options.num_objects;
+	unsigned int asize;//=(besize>>ABV_LOG_WORD_SIZE) + 1;
+	unsigned int block_chunks;//=(besize + blockDim.x -1)>>CU_LOG_THREADS;
+	unsigned int rpsize;
+	unsigned int resize;
+};
 typedef struct _options * Options;
 
 
