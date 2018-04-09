@@ -48,6 +48,7 @@
 #include <timestat.h>
 
 using namespace std;
+#define CSV_OUTPUT 0
 
 int main (int argc, char* argv[]) {
 	//Structures* structures = new Structures;
@@ -58,7 +59,7 @@ int main (int argc, char* argv[]) {
 	int example=0;
 	bool accu=true;
 	bool random_system=true;
-	int outputtype=0;
+	int outputtype=CSV_OUTPUT;
 	string input_file="small.bin";
 	string filter_file="";
 	/* Default */
@@ -173,7 +174,7 @@ int main (int argc, char* argv[]) {
 			cout << "Usage: ./abcd <options>" <<endl<<
 				        "Options for the simulation:"<<endl<<
 					" -f: input file in binary format (revision 16-09-2014 supported)" << endl <<
-					" -w: filter output file" << endl <<
+					" -w: filter output file (csv output only)" << endl <<
 					" -s: number of simulations"<< endl <<
 					" -a: accuracy in the algorithms" << endl <<
 					" -d: fast, less accurate RNG initialization (GPU-only)" << endl <<
@@ -229,7 +230,12 @@ int main (int argc, char* argv[]) {
 	PDP_Psystem_output* output=NULL;
 	PDP_Psystem* PDPps=NULL;
 	Simulator *simulator=NULL;
-	
+	//Binary output not yet supported, disabling...
+	if(outputtype!=CSV_OUTPUT && filter_file!=""){
+		cout<<"Warning: binary output filter is not supported. Disabling filtering..." <<endl;
+		filter_file="";
+
+	}
 	/* Read the input */	
 	if (!random_system) {
 	    source=new PDP_Psystem_source_binary(input_file.c_str(),options,filter_file);
@@ -298,7 +304,7 @@ int main (int argc, char* argv[]) {
 	if (mode==0) {
 		PDPps = new PDP_Psystem_REDIX(source);
 
-		if (outputtype==0)
+		if (outputtype==CSV_OUTPUT)
 			output = new PDP_Psystem_output_csv(input_file.c_str(),options);
 		else
 			output = new PDP_Psystem_output_binary(input_file.c_str(),options);
@@ -308,7 +314,7 @@ int main (int argc, char* argv[]) {
 	else if (mode==1) {
 		PDPps = new PDP_Psystem_REDIX(source);
 
-		if (outputtype==0)
+		if (outputtype==CSV_OUTPUT)
 			output = new PDP_Psystem_output_csv(input_file.c_str(),options);
 		else
 			output = new PDP_Psystem_output_binary(input_file.c_str(),options);

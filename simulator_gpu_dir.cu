@@ -541,6 +541,7 @@ bool Simulator_gpu_dir::init() {
 	checkCudaErrors(cudaMalloc((void**)&(d_configuration.membrane), d_structures->configuration.membrane_size*sizeof(CHARGE)));
 
 	//Allocate filter if any
+
 	if(options->output_filter!=NULL){
 		options->GPU_filter=true;
 		checkCudaErrors(cudaMalloc((void**)&d_output_filter,options->objects_to_output*sizeof(unsigned int)));
