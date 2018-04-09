@@ -832,7 +832,7 @@ void Simulator_gpu_dir::retrieve_copy() {
 		kernel_output_filter<<<dim3(cu_blocksx,cu_blocksy),
 									cu_threads,0,execution_stream>>>
 									(d_output_multiset,
-									d_configuration.multiset,
+									d_structures->configuration.multiset,
 									d_output_filter,
 									options->objects_to_output,
 									options->num_environments*esize);
@@ -2163,6 +2163,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 		sdkStartTimer(&counters.timer);
 	}
 	if(options->micro){
+		//TODO: sort this and preaccumulate partitions
 		if (pdp_out->will_print_dcba_phase())
 			cout << "(using micro DCBA kernel)"<<endl;
 	
