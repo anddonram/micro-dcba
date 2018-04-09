@@ -160,11 +160,11 @@ bool Simulator_gpu_dir::step(int k){
 				return false;
 
             pdp_out->print_configuration();
-
             if ((i+1)%options->cycles==0) {
             	//Wait for possible previous copy to end
             	cudaStreamSynchronize(copy_stream);
             	retrieve_copy();
+
             	//We must copy first
             	cudaStreamSynchronize(execution_stream);
 
@@ -838,16 +838,20 @@ void Simulator_gpu_dir::retrieve_copy() {
 									options->num_environments*esize);
 	}
 	//getLastCudaError("Error copying filtered output device to device");
-
-	checkCudaErrors(cudaMemcpyAsync(d_configuration.membrane, d_structures->configuration.membrane,d_structures->configuration.membrane_size*sizeof(CHARGE), cudaMemcpyDeviceToDevice,execution_stream));
-	checkCudaErrors(cudaMemcpyAsync(d_configuration.multiset, d_structures->configuration.multiset,d_structures->configuration.multiset_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToDevice,execution_stream));
+	else{
+		checkCudaErrors(cudaMemcpyAsync(d_configuration.membrane, d_structures->configuration.membrane,d_structures->configuration.membrane_size*sizeof(CHARGE), cudaMemcpyDeviceToDevice,execution_stream));
+		checkCudaErrors(cudaMemcpyAsync(d_configuration.multiset, d_structures->configuration.multiset,d_structures->configuration.multiset_size*sizeof(MULTIPLICITY), cudaMemcpyDeviceToDevice,execution_stream));
+	}
 }
 void Simulator_gpu_dir::retrieve_async(int sim_ini) {
 	if(options->GPU_filter){
 		checkCudaErrors(cudaMemcpyAsync(output_multiset, d_output_multiset, options->num_parallel_simulations*options->objects_to_output*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,copy_stream));
 	}
-	checkCudaErrors(cudaMemcpyAsync(structures->configuration.membrane+sim_ini*options->num_environments*options->num_membranes, d_configuration.membrane, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyDeviceToHost,copy_stream));
-	checkCudaErrors(cudaMemcpyAsync(structures->configuration.multiset+sim_ini*options->num_environments*esize, d_configuration.multiset, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,copy_stream));
+	else
+	{
+		checkCudaErrors(cudaMemcpyAsync(structures->configuration.membrane+sim_ini*options->num_environments*options->num_membranes, d_configuration.membrane, options->num_parallel_simulations*options->num_environments*options->num_membranes*sizeof(CHARGE), cudaMemcpyDeviceToHost,copy_stream));
+		checkCudaErrors(cudaMemcpyAsync(structures->configuration.multiset+sim_ini*options->num_environments*esize, d_configuration.multiset, options->num_parallel_simulations*options->num_environments*esize*sizeof(MULTIPLICITY), cudaMemcpyDeviceToHost,copy_stream));
+	}
 }
 //Deprecated
 void Simulator_gpu_dir::retrieve(int sim_ini) {
@@ -1149,7 +1153,6 @@ __global__ void kernel_phase1_normalization(
 		__syncthreads();
 		nr[sim*options.num_environments*besize+env*besize+block]=min;
 	}
-	__syncthreads();
 }
 
 //TODO: Implemented, but not used. I keep it just for interest
@@ -1377,7 +1380,6 @@ __global__ void kernel_phase1_update(
 		d_data_error[0]=UPDATING_CONFIGURATION_ERROR;
 	}
 	
-	__syncthreads();
 }
 
 
