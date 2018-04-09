@@ -1044,6 +1044,7 @@ __device__ inline void atomicAddf(float* address, float value){
 
 /************************************************************/
 /* Step 2 (normalization and minimums) of phase1 on the GPU */
+/* This non-accurate version causes updating errors
 /************************************************************/
 __global__ void kernel_phase1_normalization(
 		PDP_Psystem_REDIX::Ruleblock ruleblock,
