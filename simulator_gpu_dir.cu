@@ -644,22 +644,21 @@ bool Simulator_gpu_dir::init() {
 		options-> num_partitions=competition::normalize_partition(partition,trans_partition,options->num_rule_blocks);
 
 		if(options->num_partitions==1){
-			options->micro=false;
-			cout << "Full competition, disabling micro-DCBA..." << endl;
+			cout << "Full competition, micro-DCBA may not improve performance..." << endl;
 		}
-		else{
-			int independent_ruleblocks=competition::initialize_partition_structures(trans_partition,
-					options->num_partitions,options->num_rule_blocks,
-					&accum_offset,&ordered_rules
-					);
 
-			options->num_partitions-=independent_ruleblocks;
-			int dependent_ruleblocks=options->num_rule_blocks-independent_ruleblocks;
-			checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
-			checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
-			for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
+		int independent_ruleblocks=competition::initialize_partition_structures(trans_partition,
+				options->num_partitions,options->num_rule_blocks,
+				&accum_offset,&ordered_rules
+				);
 
-		}
+		options->num_partitions-=independent_ruleblocks;
+		int dependent_ruleblocks=options->num_rule_blocks-independent_ruleblocks;
+		checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
+		checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
+		for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
+
+
 
 		delete [] partition;
 		delete [] trans_partition;
