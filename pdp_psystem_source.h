@@ -72,6 +72,7 @@ struct _options{
 	//Micro DCBA params
 	bool micro;
 	int num_partitions;
+	int independent_ruleblocks;
 
 };
 struct _computations{

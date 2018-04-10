@@ -607,23 +607,20 @@ bool Simulator_gpu_dir::init() {
 			cout << "Full competition, micro-DCBA may not improve performance..." << endl;
 		}
 
-		int independent_ruleblocks=competition::initialize_partition_structures(trans_partition,
+		options->independent_ruleblocks=competition::initialize_partition_structures(trans_partition,
 				options->num_partitions,options->num_rule_blocks,
 				&accum_offset,&ordered_rules
 				);
 		competition::reorder_ruleblocks(structures,ordered_rules,options);
 
-		options->num_partitions-=independent_ruleblocks;
-		//Partitions that have more than one ruleblock competing
-		int dependent_ruleblocks=options->num_rule_blocks-independent_ruleblocks;
+		options->num_partitions-=options->independent_ruleblocks;
+		//Ruleblocks that competes with other ruleblocks
+		int dependent_ruleblocks=options->num_rule_blocks-options->independent_ruleblocks;
 		//checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
 		//checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
 		for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
 
-		int accum_partitions=0;
-		for(int i=0;i<options->num_rule_blocks;i++){
-			accum_offset[i];
-		}
+
 
 		delete [] partition;
 		delete [] trans_partition;
@@ -1830,7 +1827,7 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 
 	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
 		__syncthreads();
-
+		//TODO:remove this
 		int block_idx=bchunk*bdim+threadIdx.x;
 
 		//if(block_idx>=part_size)break;
@@ -2755,7 +2752,88 @@ __global__ void kernel_phase4 (PDP_Psystem_REDIX::Rule rule,
 		r = reini+(it++)*blockDim.x+threadIdx.x;
 	}
 }
+__global__ void kernel_phase4_rules (PDP_Psystem_REDIX::Rule rule,
+			PDP_Psystem_REDIX::Configuration configuration,
+			PDP_Psystem_REDIX::Rhs rhs,
+			PDP_Psystem_REDIX::NR nr,
+		//	struct _options options,
+			int part_init,
+			int part_end) {
+	_options options=d_options;
+	uint resize=d_computations.resize;
+	uint rpsize=part_end-part_init;
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint r=threadIdx.x;
+	uint esize=options.num_objects*options.num_membranes;
+	uint msize=options.num_objects;
+	uint rp_chunks=(rpsize + blockDim.x -1)>>CU_LOG_THREADS;
 
+	/* Rules of Pi, executed by each environment */
+	for (int rchunk=0; rchunk < rp_chunks; rchunk++) {
+		r=rchunk*blockDim.x+threadIdx.x+part_init;
+
+		uint N=0;
+
+		if (r < rpsize)
+			N=nr[D_NR_P_IDX(r)];
+
+		if (N>0) {
+			int o_ini=rule.rhs_idx[r];
+			int o_end=rule.rhs_idx[r+1];
+
+			for (int o=o_ini; o<o_end; o++) {
+				uint obj=rhs.object[o];
+				uint mult=rhs.mmultiplicity[o];
+				uint membr=GET_MEMBR(mult);
+				mult=GET_MULTIPLICITY(mult);
+
+				atomicAdd(&(configuration.multiset[D_MU_IDX(obj,membr)]),N*mult);
+			}
+		}
+		//__syncthreads();
+	}
+
+}
+__global__ void kernel_phase4_env (PDP_Psystem_REDIX::Rule rule,
+			PDP_Psystem_REDIX::Configuration configuration,
+			PDP_Psystem_REDIX::Rhs rhs,
+			PDP_Psystem_REDIX::NR nr,
+			uint re_chunk) {
+	_options options=d_options;
+	uint resize=d_computations.resize;
+	uint rpsize=d_computations.rpsize;
+
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint r=threadIdx.x;
+	uint esize=options.num_objects*options.num_membranes;
+	uint reini=rpsize+env*re_chunk;
+	uint reend=rpsize+(env+1)*re_chunk;
+	uint it=0;
+
+	r = reini+(it++)*blockDim.x+threadIdx.x;
+
+
+	while ((r<resize) && (r<reend)) {
+		int o_ini=rule.rhs_idx[r];
+		int o_end=rule.rhs_idx[r+1];
+
+		uint N=nr[D_NR_E_IDX(r)];
+
+		if (N>0)
+		for (int o=o_ini; o<o_end; o++) {
+			uint obj=rhs.object[o];
+			uint denv=rhs.mmultiplicity[o];
+
+			obj=sim*options.num_environments*esize+
+				denv*esize+obj;
+
+			atomicAdd(&(configuration.multiset[obj]),N);
+		}
+		r = reini+(it++)*blockDim.x+threadIdx.x;
+	}
+}
 
 int Simulator_gpu_dir::execution() {
 		
@@ -2789,13 +2867,108 @@ int Simulator_gpu_dir::execution() {
 	dim3 dimGrid (cu_blocksx, cu_blocksy);
 	dim3 dimBlock (cu_threads);
 
-	kernel_phase4 <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->rule,
-		d_structures->configuration, d_structures->rhs, 
-		d_structures->nr, d_structures->pi_rule_size,
-		d_structures->pi_rule_size+d_structures->env_rule_size,
-		re_chunk, *options);
+	if(options->micro){
+		//TODO: sort this and preaccumulate partitions
+		if (pdp_out->will_print_dcba_phase())
+			cout << "(using micro DCBA kernel)"<<endl;
+
+		dim3 dimGrid (cu_blocksx, cu_blocksy);
+		dim3 dimBlock (cu_threads);
 
 
+		cudaStreamSynchronize(execution_stream);
+		getLastCudaError("pre kernel for phase 4 micro launch failure");
+
+		int stream_to_go=0;
+		int start_partition=0;
+		//Accumulated size
+		int partition_size=0;
+
+		for(int i=0;i<options->num_partitions;i++){
+			int part_size=accum_offset[i+1] - accum_offset[i];
+
+			if(part_size>=cu_threads){
+				if(start_partition!=i){
+					//there was something already accumulated, launch it
+					kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
+														d_structures->configuration, d_structures->rhs,
+														d_structures->nr,
+														structures->ruleblock.rule_idx[accum_offset[start_partition]],
+														structures->ruleblock.rule_idx[accum_offset[i]]);
+
+					stream_to_go++;
+					if(stream_to_go==NUM_STREAMS)
+						stream_to_go=0;
+
+				}
+				uint part_end=accum_offset[i+1];
+				if(i+1==options->num_partitions){
+					//If we have finished, append the rest (independent blocks)
+					cout<<"last chunk"<<endl;
+					part_end+= options->independent_ruleblocks;
+				}
+				//Large partition, launch independently
+				kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
+										d_structures->configuration, d_structures->rhs,
+										d_structures->nr,
+										structures->ruleblock.rule_idx[accum_offset[i]],
+										structures->ruleblock.rule_idx[part_end]);
+
+
+				stream_to_go++;
+				if(stream_to_go==NUM_STREAMS)
+					stream_to_go=0;
+				start_partition=i+1;
+				partition_size=0;
+			}else{
+				//Small partition, accumulate parts
+				if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
+					//Enough accumulate (or last iteration), launch
+					uint part_end=accum_offset[i+1];
+					if(i+1==options->num_partitions){
+						//If we have finished, append the rest (independent blocks)
+						part_end+= options->independent_ruleblocks;
+					}
+					kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
+						d_structures->configuration, d_structures->rhs,
+						d_structures->nr,
+						structures->ruleblock.rule_idx[accum_offset[start_partition]],
+						structures->ruleblock.rule_idx[part_end]
+						                               );
+
+
+					stream_to_go++;
+					if(stream_to_go==NUM_STREAMS)
+						stream_to_go=0;
+					start_partition=i+1;
+					partition_size=0;
+				}else{
+					//Accumulate
+					partition_size+=part_size;
+
+				}
+			}
+
+		}
+		kernel_phase4_env <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->rule,
+					d_structures->configuration, d_structures->rhs,
+					d_structures->nr, re_chunk);
+		for(int i=0;i<NUM_STREAMS;i++){
+			cudaStreamSynchronize(streams[i]);
+		}
+		cudaStreamSynchronize(execution_stream);
+
+		getLastCudaError("kernel for phase 2 micro launch failure");
+
+	}else{
+
+		kernel_phase4 <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->rule,
+			d_structures->configuration, d_structures->rhs,
+			d_structures->nr, d_structures->pi_rule_size,
+			d_structures->pi_rule_size+d_structures->env_rule_size,
+			re_chunk, *options);
+
+	}
 
 	if (runcomp) {
 		cudaStreamSynchronize(execution_stream);
