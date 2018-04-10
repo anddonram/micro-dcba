@@ -156,7 +156,8 @@ bool Simulator_gpu_dir::step(int k){
 				return false;
 
 			//Check consistency and updating errors
-			if ((i+1)%options->error_cycle==0 && check_step_errors())
+			//Each cycle or if its last step
+			if ((i+1==k||(i+1)%options->error_cycle==0) && check_step_errors())
 				return false;
 
             pdp_out->print_configuration();
@@ -579,7 +580,50 @@ bool Simulator_gpu_dir::init() {
 	/* Copies */
 	//Now they are async with curng_init!!!
 
+	//If miro-DCBA, make partition
+	if(options->micro){
+		int* partition=new int[options->num_rule_blocks];
+		int* trans_partition=new int[options->num_rule_blocks];
+		int* alphabet=new int[options->num_objects*options->num_membranes];
 
+		competition::reset_partition(partition,
+				alphabet,
+				options->num_rule_blocks,
+				options->num_objects*options->num_membranes);
+
+		competition::make_partition_2(partition,
+					structures->ruleblock.lhs_idx,
+					structures->lhs.object,
+					alphabet,
+					options->num_rule_blocks,
+					options->num_objects,
+					options->num_membranes,
+					structures->lhs.mmultiplicity,
+					structures->lhs_size);
+		//Counts the number of different competition blocks
+		options-> num_partitions=competition::normalize_partition(partition,trans_partition,options->num_rule_blocks);
+
+		if(options->num_partitions==1){
+			cout << "Full competition, micro-DCBA may not improve performance..." << endl;
+		}
+
+		int independent_ruleblocks=competition::initialize_partition_structures(trans_partition,
+				options->num_partitions,options->num_rule_blocks,
+				&accum_offset,&ordered_rules
+				);
+		competition::reorder_ruleblocks(structures,ordered_rules,options);
+
+		options->num_partitions-=independent_ruleblocks;
+		int dependent_ruleblocks=options->num_rule_blocks-independent_ruleblocks;
+		checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
+		checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
+		for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
+
+
+		delete [] partition;
+		delete [] trans_partition;
+		delete [] alphabet;
+	}
 
 
 	// Set ABV
@@ -620,50 +664,7 @@ bool Simulator_gpu_dir::init() {
 		checkCudaErrors(cudaMemcpyAsync(d_ini_numerator, ini_numerator, esize*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
 	}	
 
-	//If miro-DCBA, make partition
-	if(options->micro){
-		int* partition=new int[options->num_rule_blocks];
-		int* trans_partition=new int[options->num_rule_blocks];
-		int* alphabet=new int[options->num_objects*options->num_membranes];
 
-		competition::reset_partition(partition,
-				alphabet,
-				options->num_rule_blocks,
-				options->num_objects*options->num_membranes);
-
-	    competition::make_partition_2(partition,
-	    			structures->ruleblock.lhs_idx,
-	    			structures->lhs.object,
-	    			alphabet,
-	    			options->num_rule_blocks,
-	    			options->num_objects,
-	    			options->num_membranes,
-	    			structures->lhs.mmultiplicity,
-	    			structures->lhs_size);
-	    //Counts the number of different competition blocks
-		options-> num_partitions=competition::normalize_partition(partition,trans_partition,options->num_rule_blocks);
-
-		if(options->num_partitions==1){
-			cout << "Full competition, micro-DCBA may not improve performance..." << endl;
-		}
-
-		int independent_ruleblocks=competition::initialize_partition_structures(trans_partition,
-				options->num_partitions,options->num_rule_blocks,
-				&accum_offset,&ordered_rules
-				);
-
-		options->num_partitions-=independent_ruleblocks;
-		int dependent_ruleblocks=options->num_rule_blocks-independent_ruleblocks;
-		checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
-		checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
-		for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
-
-
-
-		delete [] partition;
-		delete [] trans_partition;
-		delete [] alphabet;
-	}
 
 	//Using constant memory to load as symbols results in no real gain (nor loss)
 	checkCudaErrors(cudaMemcpyToSymbolAsync(d_options, options, sizeof(_options),size_t(0),cudaMemcpyHostToDevice,copy_stream));
@@ -1208,8 +1209,8 @@ __global__ void kernel_phase1_normalization_acu (
 		__syncthreads();
 
 
-		// If the block is activated
-		//TODO: Check if this must be true or false
+		//
+		// We start by having the total sum and inactive blocks substract their multiplicities
 		if ((block < besize) &&
 //				!((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
 //					        >> ((~threadIdx.x)&ABV_DESPL_MASK))
@@ -1821,15 +1822,17 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 	if(threadIdx.x==0){
 		s_next=0;
 	}
-	__syncthreads();
+	//__syncthreads();
 
 	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
+		__syncthreads();
 
 		int block_idx=bchunk*bdim+threadIdx.x;
 
-		if(block_idx>=part_size)break;
+		//if(block_idx>=part_size)break;
 
-		block=ordered_rules[block_idx+part_init];
+		block=block_idx+part_init;
+
 		//Get activation bit vectors
 //
 //		printf("thread %u block %u abv %u\n",threadIdx.x,block,
@@ -1849,7 +1852,7 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 //		}
 
 		//Custom activation index
-		//Access abv index threadIdx.x, but use block%CU_THREADS module
+		//Access abv with index threadIdx.x, but use block%CU_THREADS (bdim) as access
 		uint bidx=(block%bdim);
 		if (block < part_size &&
 				(d_abv[sim*options.num_environments*asize+
@@ -1861,7 +1864,7 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		}
 		__syncthreads();
 
-		if(threadIdx.x!=0)continue;
+		if(threadIdx.x==0){
 		//1. iterate rules in random order previously calculated
 		//2. for each rule, calculate minimum applications
 		//3. for each rule, update applications and configurations
@@ -1917,7 +1920,7 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 
 		}
 		s_next=0;
-		__syncthreads();
+		}
 
 	}
 
@@ -2180,7 +2183,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 		int partition_size=0;
 
 		//Trick:If a rule has no competition, then it must have been applied as many times as possible,
-		//so there is no point in launching a kernel
+		//so there is no point in launching a kernel with it
 		for(int i=0;i<options->num_partitions;i++){
 			int part_size=accum_offset[i+1] - accum_offset[i];
 

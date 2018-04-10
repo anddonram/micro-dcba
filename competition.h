@@ -50,6 +50,10 @@ int initialize_partition_structures(int* partition,
 		int num_rules,
 		int** accum_offsets,
 		int** ordered);
+
+int reorder_ruleblocks(PDP_Psystem_REDIX::Structures structures,
+		int* ordered,
+		Options options);
 }
 
 #endif /* COMPETITION_H_ */

@@ -734,7 +734,7 @@ int initialize_partition_structures(int* partition,
 	}
 
 	for(int i=0;i<num_rules;i++){
-		//Get offsets
+		//Get offsets (partition sizes)
 		offsets[partition[i]]++;
 	}
 
@@ -743,7 +743,7 @@ int initialize_partition_structures(int* partition,
 	expanded_accum_offsets[0]=0;
 	int compact_index=0;
 	for(int i=0;i<num_partitions;i++){
-		//Accumulated offsets
+		//Accumulated offsets (partition sizes)
 		int val=0;
 		if(offsets[i]!=1){
 			val=offsets[i];
@@ -756,14 +756,19 @@ int initialize_partition_structures(int* partition,
 	}
 
 	//Sort rules
-	*ordered=new int[num_rules-unique_blocks];
+	*ordered=new int[num_rules];
+	int independent_offset=num_rules-unique_blocks;
 	for(int i=0;i<num_rules;i++){
 		int part=partition[i];
-		if(offsets[part]==1)continue;
+		if(offsets[part]==1){
+			(*ordered)[independent_offset]=i;
+			independent_offset++;
+		}else{
 		//Put the rule on its corresponding position
 		(*ordered)[expanded_accum_offsets[part]+current_offset[part]]=i;
 		//Advance pointer one unit
 		current_offset[part]++;
+		}
 	}
 
 	//Print for debugging purposes
@@ -789,6 +794,204 @@ int initialize_partition_structures(int* partition,
 
 	return unique_blocks;
 }
+//Sorts the blocks and everything related to them. After that, the blocks in the same partition are coalesced
+int reorder_ruleblocks(PDP_Psystem_REDIX::Structures structures,
+		int* ordered,
+		Options options){
 
+	PDP_Psystem_REDIX::Structures reordered=new PDP_Psystem_REDIX::struct_structures;
+
+	reordered->ruleblock.lhs_idx = new LHS_IDX [options->num_rule_blocks+1];
+	reordered->ruleblock.rule_idx = new RULE_IDX [options->num_rule_blocks+1];
+	reordered->ruleblock.membrane = new MEMBRANE [options->num_rule_blocks];
+
+	reordered->ruleblock_size=structures->pi_rule_size+1;
+	reordered->rule.rhs_idx = new RHS_IDX [reordered->ruleblock_size];
+
+	/* Create empty data for LHS */
+
+	reordered->lhs_size=structures->ruleblock.lhs_idx[options->num_rule_blocks];
+	reordered->lhs.object = new OBJECT [reordered->lhs_size];
+	reordered->lhs.mmultiplicity = new MULTIPLICITY [reordered->lhs_size];
+	reordered->lhs.imultiplicity = new INV_MULTIPLICITY [reordered->lhs_size];
+
+	/* Create empty probabilities */
+	reordered->probability_size=structures->pi_rule_size*options->num_environments;
+	reordered->probability = new PROBABILITY [reordered->probability_size];
+
+	reordered->rhs_size=structures->rule.rhs_idx[structures->ruleblock.rule_idx[options->num_rule_blocks]];
+	reordered->rhs.object = new OBJECT [reordered->rhs_size];
+	reordered->rhs.mmultiplicity = new MULTIPLICITY [reordered->rhs_size];
+
+	reordered->ruleblock.lhs_idx[0]=0;
+	reordered->ruleblock.rule_idx[0]=0;
+	reordered->rule.rhs_idx[0]=0;
+
+	for(int i=0;i < options->num_rule_blocks;i++){
+		uint block=ordered[i];
+		//Auxiliar indexes
+		int lhs_init=structures->ruleblock.lhs_idx[block];
+		int lhs_end=structures->ruleblock.lhs_idx[block+1];
+		int rule_init=structures->ruleblock.rule_idx[block];
+		int rule_end=structures->ruleblock.rule_idx[block+1];
+
+		int lhs_offset=reordered->ruleblock.lhs_idx[i];
+		int rule_offset=reordered->ruleblock.rule_idx[i];
+
+		//Calculate offset for rules and lhs
+		reordered->ruleblock.membrane[i]=structures->ruleblock.membrane[block];
+		reordered->ruleblock.lhs_idx[i+1]=lhs_offset+ (lhs_end-lhs_init);
+		reordered->ruleblock.rule_idx[i+1]=rule_offset+ (rule_end-rule_init);
+
+		for(int j=0;j<lhs_end-lhs_init;j++){
+			//Reassign each object to its new position
+			reordered->lhs.object[lhs_offset+j]=structures->lhs.object[lhs_init+j];
+			reordered->lhs.mmultiplicity[lhs_offset+j]=structures->lhs.mmultiplicity[lhs_init+j];
+			reordered->lhs.imultiplicity[lhs_offset+j]=structures->lhs.imultiplicity[lhs_init+j];
+		}
+
+		for(int j=0;j<rule_end-rule_init;j++){
+			//Reassign each rule to its new position
+			int rhs_init=structures->rule.rhs_idx[rule_init+j];
+			int rhs_end=structures->rule.rhs_idx[rule_init+j+1];
+
+			int rhs_offset=reordered->rule.rhs_idx[rule_offset+j];
+
+			reordered->rule.rhs_idx[rule_offset+j+1]=rhs_offset+(rhs_end-rhs_init);
+
+			for(int k=0;k<rhs_end-rhs_init;k++){
+				//Reassign each rhs to its new position
+				reordered->rhs.object[rhs_offset+k]=structures->rhs.object[rhs_init+k];
+				reordered->rhs.mmultiplicity[rhs_offset+k]=structures->rhs.mmultiplicity[rhs_init+k];
+			}
+			for (int env=0; env<options->num_environments; env++) {
+				//Reassign probabilities of each rule
+				reordered->probability[env*structures->pi_rule_size+rule_offset+j]=structures->probability
+						[env*structures->pi_rule_size+rule_init+j];
+			}
+		}
+
+
+	}
+
+
+	//Checking solution (works alright)
+//	for(int i=0;i<options->num_rule_blocks;i++){
+//		uint block=ordered[i];
+//		if((structures->ruleblock.lhs_idx[block+1]-structures->ruleblock.lhs_idx[block])
+//		           !=(reordered->ruleblock.lhs_idx[i+1]-reordered->ruleblock.lhs_idx[i])){
+//
+//			std::cout<<"i: "<< i << " "<<structures->ruleblock.lhs_idx[block]<<" "
+//					<<reordered->ruleblock.lhs_idx[i]<<std::endl;
+//		}
+//		if(structures->ruleblock.membrane[block]!=reordered->ruleblock.membrane[i]){
+//			std::cout<<"i: "<< i << " "<<structures->ruleblock.membrane[block]<<" "
+//					<<reordered->ruleblock.membrane[i]<<std::endl;
+//		}
+//		if((structures->ruleblock.rule_idx[block+1]-structures->ruleblock.rule_idx[block])
+//		          !=(reordered->ruleblock.rule_idx[i+1]-reordered->ruleblock.rule_idx[i])){
+//			std::cout<<"i: "<< i << " "<<structures->ruleblock.rule_idx[block]<<" "
+//					<<reordered->ruleblock.rule_idx[i]<<std::endl;
+//		}
+//
+//	}
+//
+//
+//	std::cout<< "ordered"<<std::endl;
+//	for(int i=0;i<options->num_rule_blocks;i++){
+//		std::cout<<ordered[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//
+//	std::cout<< "lhs"<<std::endl;
+//	for(int i=0;i<structures->lhs_size;i++){
+//		std::cout<<structures->lhs.object[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//	for(int i=0;i<reordered->lhs_size;i++){
+//		std::cout<<reordered->lhs.object[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//
+//	std::cout<< "rhs idx"<<std::endl;
+//	for(int i=0;i<structures->pi_rule_size;i++){
+//		std::cout<<structures->rule.rhs_idx[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//	for(int i=0;i<structures->pi_rule_size;i++){
+//		std::cout<<reordered->rule.rhs_idx[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//
+//
+//	std::cout<< "rhs object"<<std::endl;
+//	for(int i=0;i<structures->rhs_size;i++){
+//		std::cout<<structures->rhs.object[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//	for(int i=0;i<reordered->rhs_size;i++){
+//		std::cout<<reordered->rhs.object[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//
+//	std::cout<< "rule"<<std::endl;
+//	for(int i=0;i<structures->ruleblock_size;i++){
+//		std::cout<<structures->ruleblock.rule_idx[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//	for(int i=0;i<options->num_rule_blocks+1;i++){
+//		std::cout<<reordered->ruleblock.rule_idx[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//
+//	std::cout<< "prob"<<std::endl;
+//	for(int i=0;i<structures->probability_size;i++){
+//		std::cout<<structures->probability[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//	for(int i=0;i<reordered->probability_size;i++){
+//		std::cout<<reordered->probability[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+
+	//Warning: take into account the real size of what we must copy
+
+	memcpy(structures->ruleblock.lhs_idx,reordered->ruleblock.lhs_idx,options->num_rule_blocks*sizeof(LHS_IDX));
+	memcpy(structures->ruleblock.rule_idx,reordered->ruleblock.rule_idx,options->num_rule_blocks*sizeof(RULE_IDX));
+	memcpy(structures->ruleblock.membrane,reordered->ruleblock.membrane,options->num_rule_blocks*sizeof(MEMBRANE));
+
+	memcpy(structures->rule.rhs_idx,reordered->rule.rhs_idx,reordered->ruleblock_size*sizeof(RHS_IDX));
+
+	memcpy(structures->lhs.object,reordered->lhs.object,reordered->lhs_size*sizeof(OBJECT));
+	memcpy(structures->lhs.mmultiplicity,reordered->lhs.mmultiplicity,reordered->lhs_size*sizeof(MULTIPLICITY));
+	memcpy(structures->lhs.imultiplicity,reordered->lhs.imultiplicity,reordered->lhs_size*sizeof(INV_MULTIPLICITY));
+
+	memcpy(structures->probability,reordered->probability,reordered->probability_size*sizeof(PROBABILITY));
+
+	memcpy(structures->rhs.object,reordered->rhs.object,reordered->rhs_size*sizeof(OBJECT));
+	memcpy(structures->rhs.mmultiplicity,reordered->rhs.mmultiplicity,reordered->rhs_size*sizeof(MULTIPLICITY));
+
+
+
+	//Free resources
+	delete [] reordered->ruleblock.lhs_idx;
+	delete [] reordered->ruleblock.rule_idx;
+	delete [] reordered->ruleblock.membrane;
+
+	delete [] reordered->rule.rhs_idx;
+
+
+	delete [] reordered->lhs.object;
+	delete [] reordered->lhs.mmultiplicity;
+	delete [] reordered->lhs.imultiplicity;
+
+	delete [] reordered->probability;
+
+	delete [] reordered->rhs.object;
+	delete [] reordered->rhs.mmultiplicity;
+
+	delete reordered;
+	return 0;
+}
 
 }
