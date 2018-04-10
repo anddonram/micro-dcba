@@ -614,11 +614,16 @@ bool Simulator_gpu_dir::init() {
 		competition::reorder_ruleblocks(structures,ordered_rules,options);
 
 		options->num_partitions-=independent_ruleblocks;
+		//Partitions that have more than one ruleblock competing
 		int dependent_ruleblocks=options->num_rule_blocks-independent_ruleblocks;
-		checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
-		checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
+		//checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
+		//checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
 		for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
 
+		int accum_partitions=0;
+		for(int i=0;i<options->num_rule_blocks;i++){
+			accum_offset[i];
+		}
 
 		delete [] partition;
 		delete [] trans_partition;
@@ -766,7 +771,7 @@ void Simulator_gpu_dir::del() {
 
 	//Deallocate partition for micro
 	if(options->micro){
-		checkCudaErrors(cudaFree(d_partition));
+		//checkCudaErrors(cudaFree(d_partition));
 		delete [] accum_offset;
 		delete [] ordered_rules;
 		cout<<"printmeh"<<endl;
@@ -1788,7 +1793,6 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::NR nr,
 		struct _options options,
 		uint * d_abv,
-		int *ordered_rules,
 		int part_init,
 		int part_end) {
 
@@ -2197,7 +2201,6 @@ bool Simulator_gpu_dir::selection_phase2(){
 					kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
 							d_structures->configuration, d_structures->lhs, d_structures->nb,
 							d_structures->nr, *options, d_abv,
-							d_partition,
 							accum_offset[start_partition],
 							accum_offset[i]);
 
@@ -2211,7 +2214,6 @@ bool Simulator_gpu_dir::selection_phase2(){
 				kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
 						d_structures->configuration, d_structures->lhs, d_structures->nb,
 						d_structures->nr, *options, d_abv,
-						d_partition,
 						accum_offset[i],
 						accum_offset[i+1]);
 
@@ -2227,7 +2229,6 @@ bool Simulator_gpu_dir::selection_phase2(){
 					kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
 							d_structures->configuration, d_structures->lhs, d_structures->nb,
 							d_structures->nr, *options, d_abv,
-							d_partition,
 							accum_offset[start_partition],
 							accum_offset[i+1]);
 
