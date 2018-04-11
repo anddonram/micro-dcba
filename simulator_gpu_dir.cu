@@ -280,8 +280,8 @@ bool Simulator_gpu_dir::init() {
 	//cutilCondition(options->mem < max_memory_gpu);
 	dep_mem=options->num_membranes*options->num_environments*sizeof(CHARGE); //membrane
 	dep_mem+=options->num_objects*options->num_membranes*options->num_environments*sizeof(MULTIPLICITY); //multiset
-	dep_mem+=(options->num_rule_blocks+options->num_blocks_env)*options->num_environments*sizeof(MULTIPLICITY);//nb
-	dep_mem+=((structures->pi_rule_size)*options->num_environments+structures->env_rule_size)*sizeof(MULTIPLICITY);//nr
+	dep_mem+=(options->num_rule_blocks+options->num_blocks_env)*options->num_environments*sizeof(MULTIPLICITY);//nb (block applications)
+	dep_mem+=((structures->pi_rule_size)*options->num_environments+structures->env_rule_size)*sizeof(MULTIPLICITY);//nr (rule applications)
 	dep_mem+=options->num_objects*options->num_membranes*options->num_environments*sizeof(float)*2; //addition
 	dep_mem+=asize*options->num_environments*sizeof(ABV_T); // ABV activations
 	dep_mem+=(1+options->num_membranes*options->num_environments)*sizeof(uint); //data error
@@ -1630,7 +1630,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 			}
 		}
 
-		cout << "Checking ABV: there are " << count_errors << " diferences." << endl;
+		cout << "Checking ABV: there are " << count_errors << " differences." << endl;
 
 		delete [] debug_abv;
 		
@@ -1888,6 +1888,7 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 			uint rule_mult;
 
 			//Get minimum applications
+			//TODO: can this be done in parallel?
 			for (int o=o_init; o < o_end; o++) {
 				obj=lhs.object[o];
 				membr=lhs.mmultiplicity[o];
@@ -2547,6 +2548,179 @@ __global__ void kernel_phase3(PDP_Psystem_REDIX::Ruleblock ruleblock,
 	}
 }
 
+__global__ void kernel_phase3_rules(PDP_Psystem_REDIX::Ruleblock ruleblock,
+		PDP_Psystem_REDIX::Configuration configuration,
+		PDP_Psystem_REDIX::NR nb,
+		PDP_Psystem_REDIX::NR nr,
+		PDP_Psystem_REDIX::Probability probability//,
+//		uint rpsize,
+//		uint resize,
+//		struct _options options
+		) {
+	volatile uint env=blockIdx.x;
+	volatile uint rpsize=d_computations.rpsize;
+	volatile uint resize=d_computations.resize;
+	volatile _options options=d_options;
+	volatile uint sim=blockIdx.y;
+	volatile uint block=threadIdx.x;
+	uint besize=options.num_rule_blocks;
+	uint block_chunks=(besize + blockDim.x -1)>>CU_LOG_THREADS;
+
+	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
+
+		block=bchunk*blockDim.x+threadIdx.x;
+
+		if (block >= besize) break;
+
+		int rule_ini=ruleblock.rule_idx[block];
+		int rule_end=ruleblock.rule_idx[block+1];
+
+		uint N=nb[D_NB_IDX(block)];
+		uint membr=ruleblock.membrane[block];
+
+		if (N==0) {
+			for (uint r = rule_ini; r < rule_end; r++) {
+					nr[D_NR_P_IDX(r)] = 0;
+			}
+		}
+		else {
+			//Alternative version along with the memset
+		//if(N>0){
+			// Update charges
+			configuration.membrane[D_CH_IDX(GET_MEMBRANE(membr))]=GET_BETA(membr);
+
+			float cr=0.0f,d=1.0f;
+			uint r;
+			float p;
+			uint val=0;
+			//Only n-1 rules, to avoid branching on last
+			for (r = rule_ini; r < rule_end-1; r++) {
+				val=0;
+
+				p=probability[env*rpsize+r];
+
+
+				cr = fdividef(p,d);
+
+				if (cr > 0.0f) {
+					val=curng_binomial_random (N, cr);
+				}
+
+
+				nr[D_NR_P_IDX(r)] = val;
+
+				N-=val;
+				d*=(1-cr);
+			}
+
+			//Last rule, to avoid one branch on the loop
+			r=rule_end-1;
+			val=0;
+
+			p=probability[env*rpsize+r];
+
+			cr = fdividef(p,d);
+
+			if (cr > 0.0f) {
+				val=N;
+			}
+
+			nr[D_NR_P_IDX(r)] = val;
+
+
+		}
+		__syncthreads();
+	}
+}
+__global__ void kernel_phase3_env(PDP_Psystem_REDIX::Ruleblock ruleblock,
+		PDP_Psystem_REDIX::Configuration configuration,
+		PDP_Psystem_REDIX::NR nb,
+		PDP_Psystem_REDIX::NR nr,
+		PDP_Psystem_REDIX::Probability probability//,
+//		uint rpsize,
+//		uint resize,
+//		struct _options options
+		) {
+	volatile uint env=blockIdx.x;
+	volatile uint rpsize=d_computations.rpsize;
+	volatile uint resize=d_computations.resize;
+	volatile _options options=d_options;
+	volatile uint sim=blockIdx.y;
+	volatile uint block=threadIdx.x;
+	uint besize=options.num_blocks_env;
+	uint block_chunks=(besize + blockDim.x -1)>>CU_LOG_THREADS;
+
+	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
+
+		block=bchunk*blockDim.x+threadIdx.x;
+
+		if (block >= besize) break;
+		//Get real env ruleblock adding offset
+		block+=options.num_rule_blocks;
+
+		int rule_ini=ruleblock.rule_idx[block];
+		int rule_end=ruleblock.rule_idx[block+1];
+
+		uint N=0;//nb[D_NB_IDX(block)];
+		uint membr=ruleblock.membrane[block];
+
+		if (env==GET_ENVIRONMENT(membr))
+			N=nb[D_NB_IDX(block)];
+
+		if (N==0) {
+			if (env==GET_ENVIRONMENT(membr))
+			for (uint r = rule_ini; r < rule_end; r++) {
+					nr[D_NR_E_IDX(r)] = 0;
+			}
+		}
+		else {
+			//Alternative version along with the memset
+		//if(N>0){
+			// Update charges
+			configuration.membrane[D_CH_IDX(GET_MEMBRANE(membr))]=GET_BETA(membr);
+
+			float cr=0.0f,d=1.0f;
+			uint r;
+			float p;
+			uint val=0;
+			//Only n-1 rules, to avoid branching on last
+			for (r = rule_ini; r < rule_end-1; r++) {
+				val=0;
+
+				p=probability[options.num_environments*rpsize+(r-rpsize)];
+
+				cr = fdividef(p,d);
+
+				if (cr > 0.0f) {
+					val=curng_binomial_random (N, cr);
+				}
+
+				nr[D_NR_E_IDX(r)] = val;
+
+				N-=val;
+				d*=(1-cr);
+			}
+
+			//Last rule, to avoid one branch on the loop
+			r=rule_end-1;
+			val=0;
+
+			p=probability[options.num_environments*rpsize+(r-rpsize)];
+
+
+			cr = fdividef(p,d);
+
+			if (cr > 0.0f) {
+				val=N;
+			}
+
+			nr[D_NR_E_IDX(r)] = val;
+
+
+		}
+		__syncthreads();
+	}
+}
 /************************************************/
 /* Implementation of Phase 3 (calls to kernels) */
 /************************************************/
@@ -2574,14 +2748,38 @@ bool Simulator_gpu_dir::selection_phase3() {
 	dim3 dimGrid (cu_blocksx, cu_blocksy);
 	dim3 dimBlock (cu_threads);
 
-	//cudaMemsetAsync(d_structures->nr,0,d_structures->nr_size*sizeof(MULTIPLICITY),execution_stream);
+	if(options->micro){
+		//TODO: sort this and preaccumulate partitions
+		if (pdp_out->will_print_dcba_phase())
+			cout << "(using micro DCBA kernel)"<<endl;
+
+		dim3 dimGrid (cu_blocksx, cu_blocksy);
+		dim3 dimBlock (cu_threads);
+		//cudaMemsetAsync(d_structures->nr,0,d_structures->nr_size*sizeof(MULTIPLICITY),execution_stream);
+		kernel_phase3_rules <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
+				d_structures->configuration, d_structures->nb,
+				d_structures->nr, d_structures->probability//, d_structures->pi_rule_size,
+				//d_structures->pi_rule_size+d_structures->env_rule_size,*options
+				);
+		kernel_phase3_env <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
+				d_structures->configuration, d_structures->nb,
+				d_structures->nr, d_structures->probability//, d_structures->pi_rule_size,
+				//d_structures->pi_rule_size+d_structures->env_rule_size,*options
+				);
+
+
+		cudaStreamSynchronize(execution_stream);
+		getLastCudaError("pre kernel for phase 3 micro launch failure");
+	}else{
+
+
 	kernel_phase3 <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
 		d_structures->configuration, d_structures->nb, 
 		d_structures->nr, d_structures->probability//, d_structures->pi_rule_size,
 		//d_structures->pi_rule_size+d_structures->env_rule_size,*options
 		);
 	 
-
+	}
 	if (runcomp) {
 		cudaStreamSynchronize(execution_stream);
 		getLastCudaError("kernel for phase 3 launch failure");
@@ -2869,9 +3067,6 @@ int Simulator_gpu_dir::execution() {
 
 	if(options->micro){
 		//TODO: sort this and preaccumulate partitions
-		if (pdp_out->will_print_dcba_phase())
-			cout << "(using micro DCBA kernel)"<<endl;
-
 		dim3 dimGrid (cu_blocksx, cu_blocksy);
 		dim3 dimBlock (cu_threads);
 
