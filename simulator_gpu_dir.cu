@@ -1827,12 +1827,8 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 
 	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
 		__syncthreads();
-		//TODO:remove this
-		int block_idx=bchunk*bdim+threadIdx.x;
 
-		//if(block_idx>=part_size)break;
-
-		block=block_idx+part_init;
+		block=bchunk*bdim+threadIdx.x+part_init;
 
 		//Get activation bit vectors
 //
@@ -1855,7 +1851,7 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		//Custom activation index
 		//Access abv with index threadIdx.x, but use block%CU_THREADS (bdim) as access
 		uint bidx=(block%bdim);
-		if (block < part_size &&
+		if (block < part_end &&
 				(d_abv[sim*options.num_environments*asize+
 											 env*asize+
 											 (block>>ABV_LOG_WORD_SIZE)]
@@ -1887,8 +1883,8 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 			uint membr;
 			uint rule_mult;
 
-			//Get minimum applications
-			//TODO: can this be done in parallel?
+			//Get minimum applications (cannot be done in parallel because it depends
+			//on previous applications from the random order)
 			for (int o=o_init; o < o_end; o++) {
 				obj=lhs.object[o];
 				membr=lhs.mmultiplicity[o];
@@ -2552,25 +2548,26 @@ __global__ void kernel_phase3_rules(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::Configuration configuration,
 		PDP_Psystem_REDIX::NR nb,
 		PDP_Psystem_REDIX::NR nr,
-		PDP_Psystem_REDIX::Probability probability//,
-//		uint rpsize,
-//		uint resize,
-//		struct _options options
+		PDP_Psystem_REDIX::Probability probability,
+		int part_init,
+		int part_end
 		) {
+	volatile uint part_size=part_end-part_init;
 	volatile uint env=blockIdx.x;
 	volatile uint rpsize=d_computations.rpsize;
 	volatile uint resize=d_computations.resize;
 	volatile _options options=d_options;
 	volatile uint sim=blockIdx.y;
 	volatile uint block=threadIdx.x;
-	uint besize=options.num_rule_blocks;
-	uint block_chunks=(besize + blockDim.x -1)>>CU_LOG_THREADS;
+	volatile uint besize=options.num_rule_blocks;
+	volatile uint bdim = blockDim.x;
+	uint part_chunks=((part_size) + bdim - 1)>>CU_LOG_THREADS;
+	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
 
-	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
 
-		block=bchunk*blockDim.x+threadIdx.x;
+		block=bchunk*bdim+threadIdx.x+part_init;
 
-		if (block >= besize) break;
+		if (block >= part_end) break;
 
 		int rule_ini=ruleblock.rule_idx[block];
 		int rule_end=ruleblock.rule_idx[block+1];
@@ -2749,24 +2746,88 @@ bool Simulator_gpu_dir::selection_phase3() {
 	dim3 dimBlock (cu_threads);
 
 	if(options->micro){
-		//TODO: sort this and preaccumulate partitions
-		if (pdp_out->will_print_dcba_phase())
-			cout << "(using micro DCBA kernel)"<<endl;
 
 		dim3 dimGrid (cu_blocksx, cu_blocksy);
 		dim3 dimBlock (cu_threads);
-		//cudaMemsetAsync(d_structures->nr,0,d_structures->nr_size*sizeof(MULTIPLICITY),execution_stream);
-		kernel_phase3_rules <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
-				d_structures->configuration, d_structures->nb,
-				d_structures->nr, d_structures->probability//, d_structures->pi_rule_size,
-				//d_structures->pi_rule_size+d_structures->env_rule_size,*options
-				);
+		int stream_to_go=0;
+		int start_partition=0;
+		//Accumulated size
+		int partition_size=0;
+
+		for(int i=0;i<options->num_partitions;i++){
+			int part_size=accum_offset[i+1] - accum_offset[i];
+
+			if(part_size>=cu_threads){
+				if(start_partition!=i){
+					//there was something already accumulated, launch it
+					kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+												d_structures->configuration, d_structures->nb,
+												d_structures->nr, d_structures->probability,
+												accum_offset[start_partition],
+												accum_offset[i]
+												);
+
+					stream_to_go++;
+					if(stream_to_go==NUM_STREAMS)
+						stream_to_go=0;
+
+				}
+				uint part_end=accum_offset[i+1];
+				if(i+1==options->num_partitions){
+					//If we have finished, append the rest (independent blocks)
+					part_end+= options->independent_ruleblocks;
+				}
+				//Large partition, launch independently
+				kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+											d_structures->configuration, d_structures->nb,
+											d_structures->nr, d_structures->probability,
+											accum_offset[i],
+											part_end
+											);
+
+				stream_to_go++;
+				if(stream_to_go==NUM_STREAMS)
+					stream_to_go=0;
+				start_partition=i+1;
+				partition_size=0;
+			}else{
+				//Small partition, accumulate parts
+				if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
+					//Enough accumulate (or last iteration), launch
+					uint part_end=accum_offset[i+1];
+					if(i+1==options->num_partitions){
+						//If we have finished, append the rest (independent blocks)
+						part_end+= options->independent_ruleblocks;
+					}
+					kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+							d_structures->configuration, d_structures->nb,
+							d_structures->nr, d_structures->probability,
+							accum_offset[start_partition],
+							part_end
+							);
+					stream_to_go++;
+					if(stream_to_go==NUM_STREAMS)
+						stream_to_go=0;
+					start_partition=i+1;
+					partition_size=0;
+				}else{
+					//Accumulate
+					partition_size+=part_size;
+
+				}
+			}
+
+		}
+
+
 		kernel_phase3_env <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
 				d_structures->configuration, d_structures->nb,
-				d_structures->nr, d_structures->probability//, d_structures->pi_rule_size,
-				//d_structures->pi_rule_size+d_structures->env_rule_size,*options
+				d_structures->nr, d_structures->probability
 				);
 
+		for(int i=0;i<NUM_STREAMS;i++){
+			cudaStreamSynchronize(streams[i]);
+		}
 
 		cudaStreamSynchronize(execution_stream);
 		getLastCudaError("pre kernel for phase 3 micro launch failure");
@@ -2973,7 +3034,7 @@ __global__ void kernel_phase4_rules (PDP_Psystem_REDIX::Rule rule,
 
 		uint N=0;
 
-		if (r < rpsize)
+		if (r < part_end)
 			N=nr[D_NR_P_IDX(r)];
 
 		if (N>0) {
@@ -3066,7 +3127,6 @@ int Simulator_gpu_dir::execution() {
 	dim3 dimBlock (cu_threads);
 
 	if(options->micro){
-		//TODO: sort this and preaccumulate partitions
 		dim3 dimGrid (cu_blocksx, cu_blocksy);
 		dim3 dimBlock (cu_threads);
 
@@ -3099,7 +3159,6 @@ int Simulator_gpu_dir::execution() {
 				uint part_end=accum_offset[i+1];
 				if(i+1==options->num_partitions){
 					//If we have finished, append the rest (independent blocks)
-					cout<<"last chunk"<<endl;
 					part_end+= options->independent_ruleblocks;
 				}
 				//Large partition, launch independently
