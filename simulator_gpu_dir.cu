@@ -1850,12 +1850,12 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 
 		//Custom activation index
 		//Access abv with index threadIdx.x, but use block%CU_THREADS (bdim) as access
-		uint bidx=(block%bdim);
+		//uint bidx=(block%bdim);
 		if (block < part_end &&
 				(d_abv[sim*options.num_environments*asize+
 											 env*asize+
 											 (block>>ABV_LOG_WORD_SIZE)]
-							               >> ((~bidx)&ABV_DESPL_MASK))
+							               >> ((~block)&ABV_DESPL_MASK))
 							        & 0x1) {
 			s_blocks[atomicInc(&s_next,bdim+2)]=block;
 		}
