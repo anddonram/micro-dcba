@@ -140,7 +140,7 @@ private:
 	int* ordered_rules;
 
 
-	#define NUM_STREAMS 8
+	#define NUM_STREAMS 12
 	cudaStream_t streams[NUM_STREAMS];
 	/*******************************/
 	/* Only for debugging purposes */

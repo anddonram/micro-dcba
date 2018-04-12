@@ -615,7 +615,7 @@ bool Simulator_gpu_dir::init() {
 
 		options->num_partitions-=options->independent_ruleblocks;
 		//Ruleblocks that competes with other ruleblocks
-		int dependent_ruleblocks=options->num_rule_blocks-options->independent_ruleblocks;
+		//int dependent_ruleblocks=options->num_rule_blocks-options->independent_ruleblocks;
 		//checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
 		//checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
 		for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
@@ -1168,6 +1168,107 @@ __device__ inline void atomicMul(uint* address, uint value){
 	}
 	#endif
 }
+__global__ void kernel_phase1_object_numerator(uint * d_numerator,
+			uint * d_ini_numerator,
+			uint obj_chunks){
+	// Initialize addition vector
+	struct _options options=d_options;
+	uint esize=d_computations.esize;
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint msize=options.num_objects;
+
+	for (int ochunk=0; ochunk < obj_chunks; ochunk++) {
+		uint obj=blockDim.x*blockIdx.z+ochunk*blockDim.x*gridDim.z+threadIdx.x;
+
+		if (obj>=esize) break;
+		d_numerator[D_AD_IDX(obj,0)]=d_ini_numerator[obj];
+	}
+
+}
+__global__ void kernel_phase1_normalization_acu_v2 (
+		PDP_Psystem_REDIX::Ruleblock ruleblock,
+		PDP_Psystem_REDIX::Configuration configuration,
+		PDP_Psystem_REDIX::Lhs lhs,
+		PDP_Psystem_REDIX::NR nr,
+		uint * d_denominator,
+		uint * d_numerator,
+		uint * d_abv,
+		uint part_init,
+		uint part_end) {
+	struct _options options=d_options;
+	uint part_size=part_end-part_init;
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint bdim=blockDim.x;
+	uint block=threadIdx.x;
+	uint besize=options.num_blocks_env+options.num_rule_blocks;
+	uint esize=options.num_objects*options.num_membranes;
+	uint msize=options.num_objects;
+	uint asize=(besize>>ABV_LOG_WORD_SIZE) + 1;
+
+	uint part_chunks=((part_size) + bdim - 1)>>CU_LOG_THREADS;
+
+	/* Normalization - step 2 *
+	 *  calculate the sum of objects in lhs */
+	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
+
+		block=bchunk*blockDim.x+threadIdx.x+part_init;
+
+		// We start by having the total sum and inactive blocks substract their multiplicities
+		if ((block < part_end) &&
+				!((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
+					        >> ((~block)&ABV_DESPL_MASK))
+							& 0x1)) {
+			uint o_init=ruleblock.lhs_idx[block];
+			uint o_end=ruleblock.lhs_idx[block+1];
+			for (int o=o_init; o < o_end; o++) {
+				uint obj=lhs.object[o];
+				uint membr=lhs.mmultiplicity[o];
+				uint mult=GET_MULTIPLICITY(membr);
+				membr=GET_MEMBR(membr);
+
+				atomicSub(d_numerator+D_AD_IDX(obj,membr),d_denominator[membr*options.num_objects+obj]/mult);
+			}
+		}
+		__syncthreads();
+	}
+
+	/* Normalization - step 2 *
+	 * Column minimum calculation */
+	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
+        uint min=0;
+
+		block=bchunk*blockDim.x+threadIdx.x+part_init;
+
+
+		// If the block is active
+		if ((block < part_end) &&
+				((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
+									        >> ((~block)&ABV_DESPL_MASK))
+											& 0x1)) {
+			min=UINT_MAX;
+            uint o_init=ruleblock.lhs_idx[block];
+			uint o_end=ruleblock.lhs_idx[block+1];
+
+			for (int o=o_init; o < o_end; o++) {
+				uint obj=lhs.object[o];
+				uint membr=lhs.mmultiplicity[o];
+				uint mult=GET_MULTIPLICITY(membr);
+				membr=GET_MEMBR(membr);
+
+				uint value = (configuration.multiset[D_MU_IDX(obj,membr)] * d_denominator[membr*options.num_objects+obj]) / (mult*mult*d_numerator[D_AD_IDX(obj,membr)]);
+				min=(value < min) ? value : min;
+				if(min==0) break;
+			}
+		}
+		__syncthreads();
+
+		if (block < part_end)
+			nr[D_NB_IDX(block)]=min;
+	}
+
+}
 
 __global__ void kernel_phase1_normalization_acu (
 		PDP_Psystem_REDIX::Ruleblock ruleblock,
@@ -1385,23 +1486,122 @@ __global__ void kernel_phase1_update(
 	
 }
 
+__global__ void kernel_phase1_update_v2(
+		PDP_Psystem_REDIX::Ruleblock ruleblock,
+		PDP_Psystem_REDIX::Configuration configuration,
+		PDP_Psystem_REDIX::Lhs lhs,
+		PDP_Psystem_REDIX::NR nb,
+		PDP_Psystem_REDIX::NR nr,
+		//struct _options options,
+		uint * d_abv,
+		uint * d_data_error,
+		uint part_init,
+		uint part_end) {
+	struct _options options=d_options;
+	uint part_size=part_end-part_init;
+	bool update_error=false;
+	uint block_upd_error=0;
+	uint bdim=blockDim.x;
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint block=threadIdx.x;
+	uint besize=options.num_blocks_env+options.num_rule_blocks;
+	uint esize=options.num_objects*options.num_membranes;
+	uint msize=options.num_objects;
+	uint asize=(besize>>ABV_LOG_WORD_SIZE) + 1;
+	uint part_chunks=((part_size) + bdim - 1)>>CU_LOG_THREADS;
+
+	/* Deleting LHS *
+	 * Adding block applications */
+	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
+	
+		block=bchunk*blockDim.x+threadIdx.x+part_init;
+		if (block >= part_end) break;
+
+		uint bapp=nr[D_NB_IDX(block)];
+
+		if (bapp>0) {
+
+			/* Consume LHS */
+            uint o_init=ruleblock.lhs_idx[block];
+			uint o_end=ruleblock.lhs_idx[block+1];
+			for (int o=o_init; o < o_end; o++) {
+				uint obj=lhs.object[o];
+				uint membr=lhs.mmultiplicity[o];
+				uint mult=GET_MULTIPLICITY(membr);
+				membr=GET_MEMBR(membr);
+
+				/* Delete block application and check errors */
+				if (atomicSub(configuration.multiset+sim*options.num_environments*esize+env*esize+membr*msize+obj,bapp*mult)
+					< bapp*mult)
+					if (!update_error) update_error=true;
+					block_upd_error = 1+block;
+
+			}
+
+			/* Add applications to block */
+			nb[D_NB_IDX(block)]+=bapp;
+		}
+	}
+	__syncthreads();
+
+	/** Filter 2 **/
+	//After consuming objects, check which can still be applied, for phase2 to be filtered
+	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
+
+		block=bchunk*blockDim.x+threadIdx.x+part_init;
+		if (block >= part_end) break;
+
+
+		if ((d_abv[sim*options.num_environments*asize+
+					 env*asize+
+					 (block>>ABV_LOG_WORD_SIZE)]
+	               >> ((~block)&ABV_DESPL_MASK))
+	               & 0x1) {
+			// Using new registers avoid memory accesses on the for loop
+			uint o_init=ruleblock.lhs_idx[block];
+			uint o_end=ruleblock.lhs_idx[block+1];
+			for (int o=o_init; o < o_end; o++) {
+				uint obj=lhs.object[o];
+				uint membr=lhs.mmultiplicity[o];
+				uint mult=GET_MULTIPLICITY(membr);
+				membr=GET_MEMBR(membr);
+
+				// Check if we have enough objects to apply the block
+				if (configuration.multiset[sim*options.num_environments*esize+env*esize+membr*msize+obj]<mult) {
+					atomicAnd((d_abv+sim*options.num_environments*asize+
+									 env*asize+
+									 (block>>ABV_LOG_WORD_SIZE)), ~(0x1<<((~block)&ABV_DESPL_MASK)));
+					break;
+				}
+			}
+		}
+	}
+	//Changed: only save error if it was all ok until here (otherwise we would be overwriting, for example, CONSISTENCY_ERROR)
+	if (threadIdx.x==0 && update_error && d_data_error[0]==0) {
+		d_data_error[1+sim*options.num_environments*options.num_membranes+env*options.num_membranes]=block_upd_error;
+		d_data_error[0]=UPDATING_CONFIGURATION_ERROR;
+	}
+
+}
+
 
 /************************************************/
 /* Implementation of Phase 1 (calls to kernels) */
 /************************************************/
 bool Simulator_gpu_dir::selection_phase1() {
-    
+
     pdp_out->print_dcba_phase(1);
 
     pdp_out->print_profiling_dcba_phase("Launching GPU code for phase 1");
-	
+
 	/* Create and start timers */
 	if (runcomp) {
 		counters.timek1gpu = counters.timek2gpu = counters.timek3gpu = 0;
 		counters.timek1cpu = counters.timek2cpu = counters.timek3cpu = 10;
 	}
 
-	
+
 	/* USING GPU KERNELS */
 	uint cu_threads=CU_THREADS;
 	uint cu_blocksx=options->num_environments;
@@ -1422,7 +1622,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 	kernel_phase1_filters <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nb, *options,
 			d_abv, d_data_error);
-	
+
 
 
 	if (runcomp) {
@@ -1433,19 +1633,138 @@ bool Simulator_gpu_dir::selection_phase1() {
 		counters.timek1gpu=sdkGetTimerValue(&counters.timer);
 		pdp_out->print_profiling_dcba_microphase_result(counters.timek1gpu);
 	}
-	
-	
-	
+
+
+
 	for (int a=0; a<options->accuracy; a++) {
 		/* Apply kernel for normalization */
-		
+
 		sh_mem=(cu_threads>>ABV_LOG_WORD_SIZE)*sizeof(uint);
-		
+
 		if (runcomp) {
 			pdp_out->print_profiling_dcba_microphase_name("Launching kernel for normalization");
 			sdkResetTimer(&counters.timer);
 			sdkStartTimer(&counters.timer);
 		}
+		if(options->micro){
+			dim3 dimGrid (cu_blocksx, cu_blocksy);
+			dim3 dimBlock (cu_threads);
+			//Trying to reduce kernel loop by using blocks in z component
+			dimGrid.z=32;
+			obj_chunks=(esize + cu_threads -1)/(cu_threads);
+			obj_chunks=(obj_chunks+dimGrid.z-1)/dimGrid.z;
+			kernel_phase1_object_numerator<<<dimGrid,dimBlock,0,execution_stream>>>( d_numerator,
+							 d_ini_numerator,
+							obj_chunks);
+			dimGrid.z=1;
+			cudaStreamSynchronize(execution_stream);
+			getLastCudaError("pre kernel for phase 1 micro launch failure");
+
+			int stream_to_go=0;
+			int start_partition=0;
+			//Accumulated size
+			int partition_size=0;
+
+			for(int i=0;i<options->num_partitions;i++){
+				int part_size=accum_offset[i+1] - accum_offset[i];
+
+	//			cout<<"start_partition "<<start_partition<< endl;
+	//			cout<<"part_size (accumulated) "<<partition_size <<endl;
+	//			cout<<"part_size "<<part_size <<endl;
+
+				if(part_size>=cu_threads){
+					if(start_partition!=i){
+
+						//there was something already accumulated, launch it
+						kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+									d_structures->configuration, d_structures->lhs, d_structures->nr,
+									d_denominator,d_numerator,d_abv,
+									accum_offset[start_partition],
+									accum_offset[i]);
+
+						kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+												d_structures->configuration, d_structures->lhs, d_structures->nb,
+												d_structures->nr, d_abv, d_data_error,
+												accum_offset[start_partition],
+												accum_offset[i]);
+
+						stream_to_go++;
+						if(stream_to_go==NUM_STREAMS)
+							stream_to_go=0;
+
+					}
+					uint part_end=accum_offset[i+1];
+					if(i+1==options->num_partitions){
+						//If we have finished, append the rest (independent blocks)
+						part_end+= options->independent_ruleblocks;
+					}
+					//Large partition, launch independently
+					kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+														d_structures->configuration, d_structures->lhs, d_structures->nr,
+														d_denominator,d_numerator,d_abv,
+														accum_offset[i],
+														part_end);
+
+					kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+						d_structures->configuration, d_structures->lhs, d_structures->nb,
+						d_structures->nr, d_abv, d_data_error,
+						accum_offset[i],
+						part_end);
+
+					stream_to_go++;
+					if(stream_to_go==NUM_STREAMS)
+						stream_to_go=0;
+					start_partition=i+1;
+					partition_size=0;
+				}else{
+					//Small partition, accumulate parts
+					if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
+						//Enough accumulate (or last iteration), launch
+
+						uint part_end=accum_offset[i+1];
+						if(i+1==options->num_partitions){
+							//If we have finished, append the rest (independent blocks)
+							part_end+= options->independent_ruleblocks;
+						}
+
+						kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+																				d_structures->configuration, d_structures->lhs, d_structures->nr,
+																				d_denominator,d_numerator,d_abv,
+																				accum_offset[start_partition],
+																				part_end);
+						kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+							d_structures->configuration, d_structures->lhs, d_structures->nb,
+							d_structures->nr, d_abv, d_data_error,
+							accum_offset[start_partition],
+							part_end);
+
+
+
+						stream_to_go++;
+						if(stream_to_go==NUM_STREAMS)
+							stream_to_go=0;
+						start_partition=i+1;
+						partition_size=0;
+					}else{
+						//Accumulate
+						partition_size+=part_size;
+
+					}
+				}
+
+			}
+
+			for(int i=0;i<NUM_STREAMS;i++){
+				cudaStreamSynchronize(streams[i]);
+			}
+			getLastCudaError("kernel for phase 1 micro launch failure");
+			if (runcomp) {
+				sdkStopTimer(&counters.timer);
+				counters.timek2gpu+=sdkGetTimerValue(&counters.timer);
+				pdp_out->print_profiling_dcba_microphase_result(counters.timek2gpu);
+			}
+
+		}else{
 
 		if (! accurate)
 		kernel_phase1_normalization <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
@@ -1455,7 +1774,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 		kernel_phase1_normalization_acu <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 			d_structures->configuration, d_structures->lhs, d_structures->nr,
 			*options,d_denominator,d_numerator,d_ini_numerator,d_abv,obj_chunks);
-	
+
 
 			
 		if (runcomp) {
@@ -1489,7 +1808,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 			counters.timek3gpu+=sdkGetTimerValue(&counters.timer);
 			pdp_out->print_profiling_dcba_microphase_result(counters.timek3gpu);
 		}
-		
+		}
 	}
 	
 	pdp_out->print_block_selection();
