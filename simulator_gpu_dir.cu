@@ -1009,6 +1009,7 @@ __global__ void kernel_phase1_filters(
 			}
 
 			nb[D_NB_IDX(block)] = 0;
+
 		}
 
 		__syncthreads();
@@ -1259,6 +1260,8 @@ __global__ void kernel_phase1_normalization_acu_v2 (
 				min=(value < min) ? value : min;
 				if(min==0) break;
 			}
+
+
 		}
 		__syncthreads();
 
@@ -1432,7 +1435,6 @@ __global__ void kernel_phase1_update(
 					//bapp*mult+mult) ;
 					//d_deactivate(threadIdx.x,s_abv);
 			}
-
 			/* Add applications to block */
 			nb[D_NB_IDX(block)]+=bapp;
 		}
@@ -1538,6 +1540,8 @@ __global__ void kernel_phase1_update_v2(
 
 			/* Add applications to block */
 			nb[D_NB_IDX(block)]+=bapp;
+
+
 		}
 	}
 	__syncthreads();
@@ -1666,112 +1670,59 @@ bool Simulator_gpu_dir::selection_phase1() {
 				//Large blocks separated
 				uint start=accum_offset[i];
 				uint end=accum_offset[i+1];
-				std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
+
+				kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+							d_structures->configuration, d_structures->lhs, d_structures->nr,
+							d_denominator,d_numerator,d_abv,
+							start,
+							end);
+
+				kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+							d_structures->configuration, d_structures->lhs, d_structures->nb,
+							d_structures->nr, d_abv, d_data_error,
+							start,
+							end);
+				stream_to_go++;
+				if(stream_to_go==NUM_STREAMS)
+					stream_to_go=0;
+			//	std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
 			}
 			for(int i=0;i<compacted_blocks;i++){
 				//Small blocks in chunks
 				uint start=accum_offset[part_indexes[i]];
 				uint end=accum_offset[part_indexes[i+1]];
-				std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
+				kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+							d_structures->configuration, d_structures->lhs, d_structures->nr,
+							d_denominator,d_numerator,d_abv,
+							start,
+							end);
+
+				kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+							d_structures->configuration, d_structures->lhs, d_structures->nb,
+							d_structures->nr, d_abv, d_data_error,
+							start,
+							end);
+				stream_to_go++;
+				if(stream_to_go==NUM_STREAMS)
+					stream_to_go=0;
+			//	std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
 			}
 			//Independent ruleblocks
 			uint start=accum_offset[options->num_partitions];
 			uint end=start+options->independent_ruleblocks;
-			std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
+			kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+						d_structures->configuration, d_structures->lhs, d_structures->nr,
+						d_denominator,d_numerator,d_abv,
+						start,
+						end+options->num_blocks_env);
 
-
-			int start_partition=0;
-			//Accumulated size
-			int partition_size=0;
-
-			for(int i=0;i<options->num_partitions;i++){
-				int part_size=accum_offset[i+1] - accum_offset[i];
-
-	//			cout<<"start_partition "<<start_partition<< endl;
-	//			cout<<"part_size (accumulated) "<<partition_size <<endl;
-	//			cout<<"part_size "<<part_size <<endl;
-
-				if(part_size>=cu_threads){
-					if(start_partition!=i){
-
-						//there was something already accumulated, launch it
-						kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
-									d_structures->configuration, d_structures->lhs, d_structures->nr,
-									d_denominator,d_numerator,d_abv,
-									accum_offset[start_partition],
-									accum_offset[i]);
-
-						kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
-												d_structures->configuration, d_structures->lhs, d_structures->nb,
-												d_structures->nr, d_abv, d_data_error,
-												accum_offset[start_partition],
-												accum_offset[i]);
-
-						stream_to_go++;
-						if(stream_to_go==NUM_STREAMS)
-							stream_to_go=0;
-
-					}
-					uint part_end=accum_offset[i+1];
-					if(i+1==options->num_partitions){
-						//If we have finished, append the rest (independent blocks)
-						part_end+= options->independent_ruleblocks;
-					}
-					//Large partition, launch independently
-					kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
-														d_structures->configuration, d_structures->lhs, d_structures->nr,
-														d_denominator,d_numerator,d_abv,
-														accum_offset[i],
-														part_end);
-
-					kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+			kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
 						d_structures->configuration, d_structures->lhs, d_structures->nb,
 						d_structures->nr, d_abv, d_data_error,
-						accum_offset[i],
-						part_end);
+						start,
+						end+options->num_blocks_env);
 
-					stream_to_go++;
-					if(stream_to_go==NUM_STREAMS)
-						stream_to_go=0;
-					start_partition=i+1;
-					partition_size=0;
-				}else{
-					//Small partition, accumulate parts
-					if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
-						//Enough accumulate (or last iteration), launch
-
-						uint part_end=accum_offset[i+1];
-						if(i+1==options->num_partitions){
-							//If we have finished, append the rest (independent blocks)
-							part_end+= options->independent_ruleblocks;
-						}
-
-						kernel_phase1_normalization_acu_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
-																				d_structures->configuration, d_structures->lhs, d_structures->nr,
-																				d_denominator,d_numerator,d_abv,
-																				accum_offset[start_partition],
-																				part_end);
-						kernel_phase1_update_v2 <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
-							d_structures->configuration, d_structures->lhs, d_structures->nb,
-							d_structures->nr, d_abv, d_data_error,
-							accum_offset[start_partition],
-							part_end);
-
-
-
-						stream_to_go++;
-						if(stream_to_go==NUM_STREAMS)
-							stream_to_go=0;
-						start_partition=i+1;
-						partition_size=0;
-					}else{
-						//Accumulate
-						partition_size+=part_size;
-
-					}
-				}
-
-			}
+			//std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
 
 			for(int i=0;i<NUM_STREAMS;i++){
 				cudaStreamSynchronize(streams[i]);
@@ -2121,16 +2072,16 @@ __global__ void kernel_phase2_generic(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		//       compute next s_blocks
 	}
 }
-__global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
+__global__ void kernel_phase2_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::Configuration configuration,
 		PDP_Psystem_REDIX::Lhs lhs,
 		PDP_Psystem_REDIX::NR nb,
 		PDP_Psystem_REDIX::NR nr,
-		struct _options options,
+	//	struct _options options,
 		uint * d_abv,
 		int part_init,
 		int part_end) {
-
+	struct _options options=d_options;
 	extern __shared__ uint sData[];
 	//Next b counts the number of blocks
 	uint part_size=part_end-part_init;
@@ -2494,68 +2445,33 @@ bool Simulator_gpu_dir::selection_phase2(){
 		getLastCudaError("pre kernel for phase 2 micro launch failure");
 
 		int stream_to_go=0;
-		int start_partition=0;
-		//Accumulated size
-		int partition_size=0;
-
 		//Trick:If a rule has no competition, then it must have been applied as many times as possible,
 		//so there is no point in launching a kernel with it
-		for(int i=0;i<options->num_partitions;i++){
-			int part_size=accum_offset[i+1] - accum_offset[i];
 
-//			cout<<"start_partition "<<start_partition<< endl;
-//			cout<<"part_size (accumulated) "<<partition_size <<endl;
-//			cout<<"part_size "<<part_size <<endl;
+		for(int i=0;i<large_blocks;i++){
+			//Large blocks separated
+			uint start=accum_offset[i];
+			uint end=accum_offset[i+1];
 
-			if(part_size>=cu_threads){
-				if(start_partition!=i){
-					//there was something already accumulated, launch it
-					kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
+			kernel_phase2_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
 							d_structures->configuration, d_structures->lhs, d_structures->nb,
-							d_structures->nr, *options, d_abv,
-							accum_offset[start_partition],
-							accum_offset[i]);
-
-					stream_to_go++;
-					if(stream_to_go==NUM_STREAMS)
-						stream_to_go=0;
-
-				}
-
-				//Large partition, launch independently
-				kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
-						d_structures->configuration, d_structures->lhs, d_structures->nb,
-						d_structures->nr, *options, d_abv,
-						accum_offset[i],
-						accum_offset[i+1]);
-
-				stream_to_go++;
-				if(stream_to_go==NUM_STREAMS)
-					stream_to_go=0;
-				start_partition=i+1;
-				partition_size=0;
-			}else{
-				//Small partition, accumulate parts
-				if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
-					//Enough accumulate (or last iteration), launch
-					kernel_phase2_micro_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
-							d_structures->configuration, d_structures->lhs, d_structures->nb,
-							d_structures->nr, *options, d_abv,
-							accum_offset[start_partition],
-							accum_offset[i+1]);
-
-					stream_to_go++;
-					if(stream_to_go==NUM_STREAMS)
-						stream_to_go=0;
-					start_partition=i+1;
-					partition_size=0;
-				}else{
-					//Accumulate
-					partition_size+=part_size;
-
-				}
-			}
-
+							d_structures->nr, d_abv,
+							start,end);
+			stream_to_go++;
+			if(stream_to_go==NUM_STREAMS)
+				stream_to_go=0;
+		}
+		for(int i=0;i<compacted_blocks;i++){
+			//Small blocks in chunks
+			uint start=accum_offset[part_indexes[i]];
+			uint end=accum_offset[part_indexes[i+1]];
+			kernel_phase2_v2 <<<dimGrid,dimBlock,sh_mem,streams[stream_to_go]>>> (d_structures->ruleblock,
+										d_structures->configuration, d_structures->lhs, d_structures->nb,
+										d_structures->nr, d_abv,
+										start,end);
+			stream_to_go++;
+			if(stream_to_go==NUM_STREAMS)
+				stream_to_go=0;
 		}
 
 		for(int i=0;i<NUM_STREAMS;i++){
@@ -2984,9 +2900,9 @@ __global__ void kernel_phase3_env(PDP_Psystem_REDIX::Ruleblock ruleblock,
 
 		if (N==0) {
 			if (env==GET_ENVIRONMENT(membr))
-			for (uint r = rule_ini; r < rule_end; r++) {
-					nr[D_NR_E_IDX(r)] = 0;
-			}
+				for (uint r = rule_ini; r < rule_end; r++) {
+						nr[D_NR_E_IDX(r)] = 0;
+				}
 		}
 		else {
 			//Alternative version along with the memset
@@ -3031,7 +2947,6 @@ __global__ void kernel_phase3_env(PDP_Psystem_REDIX::Ruleblock ruleblock,
 
 			nr[D_NR_E_IDX(r)] = val;
 
-
 		}
 		__syncthreads();
 	}
@@ -3068,74 +2983,50 @@ bool Simulator_gpu_dir::selection_phase3() {
 		dim3 dimGrid (cu_blocksx, cu_blocksy);
 		dim3 dimBlock (cu_threads);
 		int stream_to_go=0;
-		int start_partition=0;
-		//Accumulated size
-		int partition_size=0;
+		for(int i=0;i<large_blocks;i++){
+			//Large blocks separated
+			uint start=accum_offset[i];
+			uint end=accum_offset[i+1];
 
-		for(int i=0;i<options->num_partitions;i++){
-			int part_size=accum_offset[i+1] - accum_offset[i];
+			kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+													d_structures->configuration, d_structures->nb,
+													d_structures->nr, d_structures->probability,
+													start,
+													end
+													);
 
-			if(part_size>=cu_threads){
-				if(start_partition!=i){
-					//there was something already accumulated, launch it
-					kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
-												d_structures->configuration, d_structures->nb,
-												d_structures->nr, d_structures->probability,
-												accum_offset[start_partition],
-												accum_offset[i]
-												);
-
-					stream_to_go++;
-					if(stream_to_go==NUM_STREAMS)
-						stream_to_go=0;
-
-				}
-				uint part_end=accum_offset[i+1];
-				if(i+1==options->num_partitions){
-					//If we have finished, append the rest (independent blocks)
-					part_end+= options->independent_ruleblocks;
-				}
-				//Large partition, launch independently
-				kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+			stream_to_go++;
+			if(stream_to_go==NUM_STREAMS)
+				stream_to_go=0;
+		//	std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
+		}
+		for(int i=0;i<compacted_blocks;i++){
+			//Small blocks in chunks
+			uint start=accum_offset[part_indexes[i]];
+			uint end=accum_offset[part_indexes[i+1]];
+			kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
 											d_structures->configuration, d_structures->nb,
 											d_structures->nr, d_structures->probability,
-											accum_offset[i],
-											part_end
+											start,
+											end
 											);
 
-				stream_to_go++;
-				if(stream_to_go==NUM_STREAMS)
-					stream_to_go=0;
-				start_partition=i+1;
-				partition_size=0;
-			}else{
-				//Small partition, accumulate parts
-				if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
-					//Enough accumulate (or last iteration), launch
-					uint part_end=accum_offset[i+1];
-					if(i+1==options->num_partitions){
-						//If we have finished, append the rest (independent blocks)
-						part_end+= options->independent_ruleblocks;
-					}
-					kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
-							d_structures->configuration, d_structures->nb,
-							d_structures->nr, d_structures->probability,
-							accum_offset[start_partition],
-							part_end
-							);
-					stream_to_go++;
-					if(stream_to_go==NUM_STREAMS)
-						stream_to_go=0;
-					start_partition=i+1;
-					partition_size=0;
-				}else{
-					//Accumulate
-					partition_size+=part_size;
-
-				}
-			}
-
+			stream_to_go++;
+			if(stream_to_go==NUM_STREAMS)
+				stream_to_go=0;
+		//	std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
 		}
+		//Independent ruleblocks
+		uint start=accum_offset[options->num_partitions];
+		uint end=start+options->independent_ruleblocks;
+		kernel_phase3_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->ruleblock,
+														d_structures->configuration, d_structures->nb,
+														d_structures->nr, d_structures->probability,
+														start,
+														end
+														);
+
+
 
 
 		kernel_phase3_env <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
@@ -3286,8 +3177,11 @@ __global__ void kernel_phase4 (PDP_Psystem_REDIX::Rule rule,
 		
 		if (r < rpsize)
 			N=nr[D_NR_P_IDX(r)];
-		
-		if (N>0) {	
+
+		if (N>0) {
+			if(sim==0){
+				printf("4r %u %u %u \n",env,r,N);
+			}
 			int o_ini=rule.rhs_idx[r];
 			int o_end=rule.rhs_idx[r+1];
 			
@@ -3315,7 +3209,9 @@ __global__ void kernel_phase4 (PDP_Psystem_REDIX::Rule rule,
 		int o_end=rule.rhs_idx[r+1];
 
 		uint N=nr[D_NR_E_IDX(r)];
-
+		if(sim==0){
+			printf("4 %u %u %u \n",env,r,N);
+		}
 		if (N>0)
 		for (int o=o_ini; o<o_end; o++) {
 			uint obj=rhs.object[o];
@@ -3333,7 +3229,6 @@ __global__ void kernel_phase4_rules (PDP_Psystem_REDIX::Rule rule,
 			PDP_Psystem_REDIX::Configuration configuration,
 			PDP_Psystem_REDIX::Rhs rhs,
 			PDP_Psystem_REDIX::NR nr,
-		//	struct _options options,
 			int part_init,
 			int part_end) {
 	_options options=d_options;
@@ -3356,6 +3251,9 @@ __global__ void kernel_phase4_rules (PDP_Psystem_REDIX::Rule rule,
 			N=nr[D_NR_P_IDX(r)];
 
 		if (N>0) {
+			if(sim==0){
+				printf("4r %u %u %u \n",env,r,N);
+			}
 			int o_ini=rule.rhs_idx[r];
 			int o_end=rule.rhs_idx[r+1];
 
@@ -3396,8 +3294,9 @@ __global__ void kernel_phase4_env (PDP_Psystem_REDIX::Rule rule,
 		int o_ini=rule.rhs_idx[r];
 		int o_end=rule.rhs_idx[r+1];
 
-		uint N=nr[D_NR_E_IDX(r)];
 
+		uint N=nr[D_NR_E_IDX(r)];
+		printf("4 %u %u %u \n",env,r,N);
 		if (N>0)
 		for (int o=o_ini; o<o_end; o++) {
 			uint obj=rhs.object[o];
@@ -3453,75 +3352,48 @@ int Simulator_gpu_dir::execution() {
 		getLastCudaError("pre kernel for phase 4 micro launch failure");
 
 		int stream_to_go=0;
-		int start_partition=0;
-		//Accumulated size
-		int partition_size=0;
+		for(int i=0;i<large_blocks;i++){
+			//Large blocks separated
+			uint start=accum_offset[i];
+			uint end=accum_offset[i+1];
 
-		for(int i=0;i<options->num_partitions;i++){
-			int part_size=accum_offset[i+1] - accum_offset[i];
-
-			if(part_size>=cu_threads){
-				if(start_partition!=i){
-					//there was something already accumulated, launch it
-					kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
-														d_structures->configuration, d_structures->rhs,
-														d_structures->nr,
-														structures->ruleblock.rule_idx[accum_offset[start_partition]],
-														structures->ruleblock.rule_idx[accum_offset[i]]);
-
-					stream_to_go++;
-					if(stream_to_go==NUM_STREAMS)
-						stream_to_go=0;
-
-				}
-				uint part_end=accum_offset[i+1];
-				if(i+1==options->num_partitions){
-					//If we have finished, append the rest (independent blocks)
-					part_end+= options->independent_ruleblocks;
-				}
-				//Large partition, launch independently
-				kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
-										d_structures->configuration, d_structures->rhs,
-										d_structures->nr,
-										structures->ruleblock.rule_idx[accum_offset[i]],
-										structures->ruleblock.rule_idx[part_end]);
+			kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
+																			d_structures->configuration, d_structures->rhs,
+																			d_structures->nr,
+																			structures->ruleblock.rule_idx[start],
+																			structures->ruleblock.rule_idx[end]);
 
 
-				stream_to_go++;
-				if(stream_to_go==NUM_STREAMS)
-					stream_to_go=0;
-				start_partition=i+1;
-				partition_size=0;
-			}else{
-				//Small partition, accumulate parts
-				if(part_size+partition_size >=cu_threads||i+1==options->num_partitions){
-					//Enough accumulate (or last iteration), launch
-					uint part_end=accum_offset[i+1];
-					if(i+1==options->num_partitions){
-						//If we have finished, append the rest (independent blocks)
-						part_end+= options->independent_ruleblocks;
-					}
-					kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
-						d_structures->configuration, d_structures->rhs,
-						d_structures->nr,
-						structures->ruleblock.rule_idx[accum_offset[start_partition]],
-						structures->ruleblock.rule_idx[part_end]
-						                               );
-
-
-					stream_to_go++;
-					if(stream_to_go==NUM_STREAMS)
-						stream_to_go=0;
-					start_partition=i+1;
-					partition_size=0;
-				}else{
-					//Accumulate
-					partition_size+=part_size;
-
-				}
-			}
-
+			stream_to_go++;
+			if(stream_to_go==NUM_STREAMS)
+				stream_to_go=0;
+		//	std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
 		}
+		for(int i=0;i<compacted_blocks;i++){
+			//Small blocks in chunks
+			uint start=accum_offset[part_indexes[i]];
+			uint end=accum_offset[part_indexes[i+1]];
+			kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
+																			d_structures->configuration, d_structures->rhs,
+																			d_structures->nr,
+																			structures->ruleblock.rule_idx[start],
+																			structures->ruleblock.rule_idx[end]);
+
+
+			stream_to_go++;
+			if(stream_to_go==NUM_STREAMS)
+				stream_to_go=0;
+		//	std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
+		}
+		//Independent ruleblocks
+		uint start=accum_offset[options->num_partitions];
+		uint end=start+options->independent_ruleblocks;
+		kernel_phase4_rules <<<dimGrid,dimBlock,0,streams[stream_to_go]>>> (d_structures->rule,
+													d_structures->configuration, d_structures->rhs,
+													d_structures->nr,
+													structures->ruleblock.rule_idx[start],
+													structures->ruleblock.rule_idx[end]);
+
 		kernel_phase4_env <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->rule,
 					d_structures->configuration, d_structures->rhs,
 					d_structures->nr, re_chunk);

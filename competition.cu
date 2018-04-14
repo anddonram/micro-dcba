@@ -833,7 +833,7 @@ int initialize_partition_structures(int* partition,
 		}
 	}
 
-	std::cout<< num_partitions<<" "<<unique_blocks<< " " <<next_reorder <<std::endl;
+//	std::cout<< num_partitions<<" "<<unique_blocks<< " " <<next_reorder <<std::endl;
 
 	//Print for debugging purposes
 //	std::cout<< "partitions" <<std::endl;
