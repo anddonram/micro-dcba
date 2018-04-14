@@ -136,10 +136,11 @@ private:
 
 	//Micro-DCBA elements
 	int* d_partition;
-	int* accum_offset;
-	int* ordered_rules;
-
-
+	uint* accum_offset;
+	uint* ordered_rules;
+	uint* part_indexes;
+	uint compacted_blocks;
+	uint large_blocks;
 	#define NUM_STREAMS 12
 	cudaStream_t streams[NUM_STREAMS];
 	/*******************************/

@@ -715,61 +715,125 @@ int normalize_partition(int* partition, int* trans_partition,int size){
 int initialize_partition_structures(int* partition,
 		int num_partitions,
 		int num_rules,
-		int** accum_offsets,
-		int** ordered){
+		uint** accum_offsets,
+		uint** part_indexes,
+		uint** ordered,
+		uint* compacted_blocks,
+		uint* large_blocks,
+		int cu_threads){
 
+	//Size of each partition
 	uint* offsets=new uint[num_partitions];
+	//To keep track of the index of each rule when ordering
 	uint* current_offset=new uint[num_partitions];
 
-	*accum_offsets=new int[num_partitions+1];
+
+	//Accumulated sizes of partitions
+	*accum_offsets=new uint[num_partitions+1];
+
 	int *expanded_accum_offsets=new int[num_partitions+1];
 
-	//Parts with only one ruleblock
-	int unique_blocks=0;
-
+	//For each partition, if too large, where their rules will be moved to the beginning
+	uint* real2ord=new uint[num_partitions];
+	uint* ord2real=new uint[num_partitions];
 	//Initialize
 	for(int i=0;i<num_partitions;i++){
 		offsets[i]=0;
 		current_offset[i]=0;
+		real2ord[i]=i;
+		ord2real[i]=i;
 	}
+	//Parts with only one ruleblock
+	int unique_blocks=num_partitions;
 
+	//Index where the large blocks will be placed. After the loop, number of large blocks
+	uint next_reorder=0;
+	//Get offsets (partition sizes)
 	for(int i=0;i<num_rules;i++){
-		//Get offsets (partition sizes)
-		offsets[partition[i]]++;
+		int part=partition[i];
+		offsets[part]++;
+
+		if(offsets[part]==2){
+			unique_blocks--;
+		}
+		if(offsets[part]>=cu_threads
+				&& real2ord[part]>=next_reorder){
+			//Mark the size too big;
+
+			int ord2real_small=ord2real[next_reorder];
+			int real2ord_small=real2ord[ord2real_small];
+			int real2ord_large=real2ord[part];
+			int ord2real_large=ord2real[real2ord_large];
+
+			ord2real[next_reorder]=ord2real_large;
+			ord2real[real2ord_large]=ord2real_small;
+			real2ord[ord2real_small]=real2ord_large;
+			real2ord[part]=real2ord_small;
+
+			next_reorder++;
+
+		}
 	}
 
-	//Inclusive scan
+	*part_indexes=new uint[num_partitions-unique_blocks-next_reorder+1];
+	(*part_indexes)[0]=next_reorder;
+	//Accumulates blocks into greater chunks
+	int num_compact_blocks=0;
+	int start_position=next_reorder;
+
+	//Inclusive scan for sizes
+	//Accum offsets only has the respective increments(e.g.: 0,3,5,8)
 	(*accum_offsets)[0]=0;
+	//Expanded also has intermediate results, if unique blocks between them (e.g.: 0,3,3,5,8,8,8)
 	expanded_accum_offsets[0]=0;
 	int compact_index=0;
+
+
 	for(int i=0;i<num_partitions;i++){
 		//Accumulated offsets (partition sizes)
 		int val=0;
-		if(offsets[i]!=1){
-			val=offsets[i];
+		if(offsets[ord2real[i]]!=1){
+			//Dependent block
+			val=offsets[ord2real[i]];
 			(*accum_offsets)[compact_index+1]=(*accum_offsets)[compact_index]+val;
 			compact_index++;
-		}else{
-			unique_blocks++;
+
+			if(compact_index>next_reorder){
+				if(compact_index==num_partitions-unique_blocks||
+						(*accum_offsets)[compact_index]-(*accum_offsets)[start_position]>=cu_threads){
+
+					num_compact_blocks++;
+					(*part_indexes)[num_compact_blocks]=compact_index;
+					start_position=compact_index;
+				}
+			}
+
 		}
+
 		expanded_accum_offsets[i+1]=expanded_accum_offsets[i]+val;
 	}
+	*large_blocks=next_reorder;
+	*compacted_blocks=num_compact_blocks;
 
 	//Sort rules
-	*ordered=new int[num_rules];
+	*ordered=new uint[num_rules];
 	int independent_offset=num_rules-unique_blocks;
 	for(int i=0;i<num_rules;i++){
 		int part=partition[i];
+		int ord_part=real2ord[part];
 		if(offsets[part]==1){
+			//Independent block, put it at the end
 			(*ordered)[independent_offset]=i;
 			independent_offset++;
 		}else{
 		//Put the rule on its corresponding position
-		(*ordered)[expanded_accum_offsets[part]+current_offset[part]]=i;
-		//Advance pointer one unit
-		current_offset[part]++;
+		(*ordered)[expanded_accum_offsets[ord_part]+current_offset[ord_part]]=i;
+		//Advance index for that partition one unit
+		current_offset[ord_part]++;
 		}
 	}
+
+	std::cout<< num_partitions<<" "<<unique_blocks<< " " <<next_reorder <<std::endl;
 
 	//Print for debugging purposes
 //	std::cout<< "partitions" <<std::endl;
@@ -784,19 +848,54 @@ int initialize_partition_structures(int* partition,
 //	for(int i=0;i<num_partitions+1;i++){
 //		std::cout<<(*accum_offsets)[i] <<std::endl;
 //	}
-//	std::cout<< "ordered " << unique_blocks <<std::endl;
-//	for(int i=0;i<num_rules-unique_blocks;i++){
+//	std::cout<< "extended accum" <<std::endl;
+//	for(int i=0;i<num_partitions+1;i++){
+//		std::cout<<expanded_accum_offsets[i] <<std::endl;
+//	}
+//	std::cout<< "part_indexes" <<std::endl;
+//	for(int i=0;i<num_compact_blocks+1;i++){
+//		std::cout<<(*part_indexes)[i]<<": ";
+//		std::cout<<(*accum_offsets)[(*part_indexes)[i]]<<", ";
+//
+//	}
+//	std::cout<<std::endl;
+
+//	std::cout<< "block chunks: "<<num_compact_blocks <<std::endl;
+//	for(int i=1;i<num_compact_blocks;i++){
+//		std::cout<<((*accum_offsets)[(*part_indexes)[i]])-((*accum_offsets)[(*part_indexes)[i-1]])<<", ";
+//
+//	}
+//	std::cout<<std::endl;
+//
+//
+//	std::cout<< "reordered sizes o2r" <<std::endl;
+//	for(int i=0;i<num_partitions;i++){
+//		std::cout<<ord2real[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//	std::cout<< "reordered sizes r2o" <<std::endl;
+//	for(int i=0;i<num_partitions;i++){
+//		std::cout<<real2ord[i]<<", ";
+//	}
+//	std::cout<<std::endl;
+//
+//	std::cout<< "ordered rules, unique blocks: " << unique_blocks <<std::endl;
+//	for(int i=0;i<num_rules;i++){
 //		std::cout<<(*ordered)[i] <<std::endl;
 //	}
+//
+
 	delete [] current_offset;
 	delete [] expanded_accum_offsets;
 	delete [] offsets;
+	delete [] real2ord;
+	delete [] ord2real;
 
 	return unique_blocks;
 }
 //Sorts the blocks and everything related to them. After that, the blocks in the same partition are coalesced
 int reorder_ruleblocks(PDP_Psystem_REDIX::Structures structures,
-		int* ordered,
+		uint* ordered,
 		Options options){
 
 	PDP_Psystem_REDIX::Structures reordered=new PDP_Psystem_REDIX::struct_structures;

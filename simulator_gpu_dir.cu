@@ -609,7 +609,8 @@ bool Simulator_gpu_dir::init() {
 
 		options->independent_ruleblocks=competition::initialize_partition_structures(trans_partition,
 				options->num_partitions,options->num_rule_blocks,
-				&accum_offset,&ordered_rules
+				&accum_offset,&part_indexes,&ordered_rules,&compacted_blocks,&large_blocks,
+				CU_THREADS
 				);
 		competition::reorder_ruleblocks(structures,ordered_rules,options);
 
@@ -619,8 +620,6 @@ bool Simulator_gpu_dir::init() {
 		//checkCudaErrors(cudaMalloc((void**)&d_partition,dependent_ruleblocks*sizeof(uint)));
 		//checkCudaErrors(cudaMemcpyAsync(d_partition, ordered_rules, dependent_ruleblocks*sizeof(uint), cudaMemcpyHostToDevice,copy_stream));
 		for (int i = 0; i < NUM_STREAMS; ++i) { cudaStreamCreate(&streams[i]); }
-
-
 
 		delete [] partition;
 		delete [] trans_partition;
@@ -771,11 +770,10 @@ void Simulator_gpu_dir::del() {
 		//checkCudaErrors(cudaFree(d_partition));
 		delete [] accum_offset;
 		delete [] ordered_rules;
-		cout<<"printmeh"<<endl;
+		delete [] part_indexes;
 
 		for (int i = 0; i < NUM_STREAMS; ++i)
 		{
-			cout<<"print"<<endl;
 			cudaStreamDestroy(streams[i]);
 		}
 
@@ -1492,7 +1490,6 @@ __global__ void kernel_phase1_update_v2(
 		PDP_Psystem_REDIX::Lhs lhs,
 		PDP_Psystem_REDIX::NR nb,
 		PDP_Psystem_REDIX::NR nr,
-		//struct _options options,
 		uint * d_abv,
 		uint * d_data_error,
 		uint part_init,
@@ -1578,7 +1575,7 @@ __global__ void kernel_phase1_update_v2(
 		}
 	}
 	//Changed: only save error if it was all ok until here (otherwise we would be overwriting, for example, CONSISTENCY_ERROR)
-	if (threadIdx.x==0 && update_error && d_data_error[0]==0) {
+	if ( update_error && d_data_error[0]==0) {
 		d_data_error[1+sim*options.num_environments*options.num_membranes+env*options.num_membranes]=block_upd_error;
 		d_data_error[0]=UPDATING_CONFIGURATION_ERROR;
 	}
@@ -1647,12 +1644,16 @@ bool Simulator_gpu_dir::selection_phase1() {
 			sdkStartTimer(&counters.timer);
 		}
 		if(options->micro){
-			dim3 dimGrid (cu_blocksx, cu_blocksy);
-			dim3 dimBlock (cu_threads);
+
 			//Trying to reduce kernel loop by using blocks in z component
-			dimGrid.z=32;
+
 			obj_chunks=(esize + cu_threads -1)/(cu_threads);
-			obj_chunks=(obj_chunks+dimGrid.z-1)/dimGrid.z;
+			if(obj_chunks>=32){
+				dimGrid.z=32;
+				obj_chunks=(obj_chunks+dimGrid.z-1)/dimGrid.z;
+			}
+
+			//Reset addition vector to their initial state
 			kernel_phase1_object_numerator<<<dimGrid,dimBlock,0,execution_stream>>>( d_numerator,
 							 d_ini_numerator,
 							obj_chunks);
@@ -1661,6 +1662,24 @@ bool Simulator_gpu_dir::selection_phase1() {
 			getLastCudaError("pre kernel for phase 1 micro launch failure");
 
 			int stream_to_go=0;
+			for(int i=0;i<large_blocks;i++){
+				//Large blocks separated
+				uint start=accum_offset[i];
+				uint end=accum_offset[i+1];
+				std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
+			}
+			for(int i=0;i<compacted_blocks;i++){
+				//Small blocks in chunks
+				uint start=accum_offset[part_indexes[i]];
+				uint end=accum_offset[part_indexes[i+1]];
+				std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
+			}
+			//Independent ruleblocks
+			uint start=accum_offset[options->num_partitions];
+			uint end=start+options->independent_ruleblocks;
+			std::cout<< "from rules "<< start<<" to "<<end<<std::endl;
+
+
 			int start_partition=0;
 			//Accumulated size
 			int partition_size=0;
@@ -2149,27 +2168,7 @@ __global__ void kernel_phase2_micro_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 
 		block=bchunk*bdim+threadIdx.x+part_init;
 
-		//Get activation bit vectors
-//
-//		printf("thread %u block %u abv %u\n",threadIdx.x,block,
-//				sim*options.num_environments*asize+
-//											 env*asize+
-//											 ((block%CU_THREADS)>>ABV_LOG_WORD_SIZE));
-
-		//Why shared memory if only used once?
-//		s_abv[threadIdx.x]=d_abv[sim*options.num_environments*asize+
-//							 env*asize+
-//							 ((block%CU_THREADS)>>ABV_LOG_WORD_SIZE)];
-//
-//		__syncthreads();
-
-//		if (block < options.num_rule_blocks){
-//			printf("%u %#x %d\n ",threadIdx.x,s_abv[threadIdx.x],d_is_active(threadIdx.x,s_abv));
-//		}
-
 		//Custom activation index
-		//Access abv with index threadIdx.x, but use block%CU_THREADS (bdim) as access
-		//uint bidx=(block%bdim);
 		if (block < part_end &&
 				(d_abv[sim*options.num_environments*asize+
 											 env*asize+
