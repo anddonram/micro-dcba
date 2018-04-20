@@ -48,15 +48,15 @@ int normalize_partition(int* partition, int* trans_partition,int size);
 int initialize_partition_structures(int* partition,
 		int num_partitions,
 		int num_rules,
-		uint** accum_offsets,
-		uint** part_indexes,
-		uint** ordered,
-		uint* compacted_blocks,
-		uint* large_blocks,
+		unsigned int** accum_offsets,
+		unsigned int** part_indexes,
+		unsigned int** ordered,
+		unsigned int* compacted_blocks,
+		unsigned int* large_blocks,
 		int cu_threads);
 
 int reorder_ruleblocks(PDP_Psystem_REDIX::Structures structures,
-		uint* ordered,
+		unsigned int* ordered,
 		Options options);
 }
 

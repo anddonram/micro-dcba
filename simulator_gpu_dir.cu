@@ -164,6 +164,8 @@ bool Simulator_gpu_dir::step(int k){
             if ((i+1)%options->cycles==0) {
             	//Wait for possible previous copy to end
             	cudaStreamSynchronize(copy_stream);
+
+            	//Copy dev2dev
             	retrieve_copy();
 
             	//We must copy first
@@ -172,6 +174,7 @@ bool Simulator_gpu_dir::step(int k){
             	//Wait for previous write to copy to host
             	handle.wait();
 
+            	//Copy dev2host
             	retrieve_async(psb);
 
             	handle = std::async(std::launch::async,
@@ -1539,6 +1542,7 @@ __global__ void kernel_phase1_update_v2(
 			}
 
 			/* Add applications to block */
+
 			nb[D_NB_IDX(block)]+=bapp;
 
 
@@ -1559,6 +1563,7 @@ __global__ void kernel_phase1_update_v2(
 					 (block>>ABV_LOG_WORD_SIZE)]
 	               >> ((~block)&ABV_DESPL_MASK))
 	               & 0x1) {
+
 			// Using new registers avoid memory accesses on the for loop
 			uint o_init=ruleblock.lhs_idx[block];
 			uint o_end=ruleblock.lhs_idx[block+1];
@@ -1573,6 +1578,7 @@ __global__ void kernel_phase1_update_v2(
 					atomicAnd((d_abv+sim*options.num_environments*asize+
 									 env*asize+
 									 (block>>ABV_LOG_WORD_SIZE)), ~(0x1<<((~block)&ABV_DESPL_MASK)));
+
 					break;
 				}
 			}
@@ -2460,6 +2466,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 			stream_to_go++;
 			if(stream_to_go==NUM_STREAMS)
 				stream_to_go=0;
+
 		}
 		for(int i=0;i<compacted_blocks;i++){
 			//Small blocks in chunks
@@ -2472,6 +2479,8 @@ bool Simulator_gpu_dir::selection_phase2(){
 			stream_to_go++;
 			if(stream_to_go==NUM_STREAMS)
 				stream_to_go=0;
+
+
 		}
 
 		for(int i=0;i<NUM_STREAMS;i++){
@@ -2793,7 +2802,7 @@ __global__ void kernel_phase3_rules(PDP_Psystem_REDIX::Ruleblock ruleblock,
 	volatile _options options=d_options;
 	volatile uint sim=blockIdx.y;
 	volatile uint block=threadIdx.x;
-	volatile uint besize=options.num_rule_blocks;
+	volatile uint besize=d_computations.besize;
 	volatile uint bdim = blockDim.x;
 	uint part_chunks=((part_size) + bdim - 1)>>CU_LOG_THREADS;
 	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
@@ -2878,14 +2887,14 @@ __global__ void kernel_phase3_env(PDP_Psystem_REDIX::Ruleblock ruleblock,
 	volatile _options options=d_options;
 	volatile uint sim=blockIdx.y;
 	volatile uint block=threadIdx.x;
-	uint besize=options.num_blocks_env;
-	uint block_chunks=(besize + blockDim.x -1)>>CU_LOG_THREADS;
+	uint besize=d_computations.besize;
+	uint block_chunks=(options.num_blocks_env + blockDim.x -1)>>CU_LOG_THREADS;
 
 	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
 
 		block=bchunk*blockDim.x+threadIdx.x;
 
-		if (block >= besize) break;
+		if (block >= options.num_blocks_env) break;
 		//Get real env ruleblock adding offset
 		block+=options.num_rule_blocks;
 
@@ -3179,9 +3188,7 @@ __global__ void kernel_phase4 (PDP_Psystem_REDIX::Rule rule,
 			N=nr[D_NR_P_IDX(r)];
 
 		if (N>0) {
-			if(sim==0){
-				printf("4r %u %u %u \n",env,r,N);
-			}
+
 			int o_ini=rule.rhs_idx[r];
 			int o_end=rule.rhs_idx[r+1];
 			
@@ -3209,9 +3216,7 @@ __global__ void kernel_phase4 (PDP_Psystem_REDIX::Rule rule,
 		int o_end=rule.rhs_idx[r+1];
 
 		uint N=nr[D_NR_E_IDX(r)];
-		if(sim==0){
-			printf("4 %u %u %u \n",env,r,N);
-		}
+
 		if (N>0)
 		for (int o=o_ini; o<o_end; o++) {
 			uint obj=rhs.object[o];
@@ -3251,9 +3256,7 @@ __global__ void kernel_phase4_rules (PDP_Psystem_REDIX::Rule rule,
 			N=nr[D_NR_P_IDX(r)];
 
 		if (N>0) {
-			if(sim==0){
-				printf("4r %u %u %u \n",env,r,N);
-			}
+
 			int o_ini=rule.rhs_idx[r];
 			int o_end=rule.rhs_idx[r+1];
 
@@ -3291,12 +3294,13 @@ __global__ void kernel_phase4_env (PDP_Psystem_REDIX::Rule rule,
 
 
 	while ((r<resize) && (r<reend)) {
+
 		int o_ini=rule.rhs_idx[r];
 		int o_end=rule.rhs_idx[r+1];
 
 
 		uint N=nr[D_NR_E_IDX(r)];
-		printf("4 %u %u %u \n",env,r,N);
+
 		if (N>0)
 		for (int o=o_ini; o<o_end; o++) {
 			uint obj=rhs.object[o];

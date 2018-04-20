@@ -34,7 +34,7 @@
 using namespace std;
 
 #define MAX_MULTIPLICITY 5
-
+#define PI_OBJ 0.8
 /* Random generator of a PDP P System: maravillosos procedures */
 PDP_Psystem_source_random::PDP_Psystem_source_random(Options options) {
 	this->options=options;
@@ -164,6 +164,16 @@ unsigned int PDP_Psystem_source_random::pi_lhs_loop_V() {
 }
 
 bool PDP_Psystem_source_random::pi_lhs_next_object(unsigned int & object, unsigned int & multiplicity) {
+	//20% objects reserved for environment
+	//LHS can be any object in v, but only the 80% in u
+	bool pi_segment=U_it>lengthU[rule_block_it];
+
+	int obj_segment=pi_segment?
+			options->num_objects:
+			(options->num_objects*PI_OBJ);
+	int obj_offset=	0;
+
+
 	int oidx=0;
 	if (U_it<lengthU[rule_block_it]) {
 		oidx=U_it++;
@@ -174,8 +184,7 @@ bool PDP_Psystem_source_random::pi_lhs_next_object(unsigned int & object, unsign
 	else {
 		return false;
 	}
-
-	unsigned int obj=random() % options->num_objects;
+	unsigned int obj=(random() % obj_segment) + obj_offset;
 	bool rep=false;
 
 	do {
@@ -183,7 +192,7 @@ bool PDP_Psystem_source_random::pi_lhs_next_object(unsigned int & object, unsign
 		for (int aux=0;aux<oidx;aux++) {
 			if (obj_lhs[aux]==obj) {
 				rep=true;
-				obj=random() % options->num_objects;
+				obj=(random() % obj_segment) + obj_offset;
 				break;
 			}
 		}
@@ -257,6 +266,10 @@ unsigned int PDP_Psystem_source_random::pi_rhs_loop_V() {
 }
 
 bool PDP_Psystem_source_random::pi_rhs_next_object(unsigned int & object, unsigned int & multiplicity) {
+	//RHS can be any object
+	int obj_segment=options->num_objects;
+	int obj_offset=0;
+
 	int oidx=0;
 	if (Up_it<lengthUp[rule_block_it*options->max_num_rules+rule_it]) {
 		oidx=Up_it++;
@@ -268,7 +281,7 @@ bool PDP_Psystem_source_random::pi_rhs_next_object(unsigned int & object, unsign
 		return false;
 	}
 
-	unsigned int obj=random() % options->num_objects;
+	unsigned int obj=(random() % obj_segment) + obj_offset;
 	bool rep=false;
 
 	do {
@@ -276,7 +289,7 @@ bool PDP_Psystem_source_random::pi_rhs_next_object(unsigned int & object, unsign
 		for (int aux=0;aux<oidx;aux++) {
 			if (obj_rhs[aux]==obj) {
 				rep=true;
-				obj=random() % options->num_objects;
+				obj=(random() % obj_segment) + obj_offset;
 				break;
 			}
 		}
@@ -309,7 +322,10 @@ bool PDP_Psystem_source_random::env_next_rule_block() {
 }
 
 unsigned int PDP_Psystem_source_random::env_get_object_lhs() {
-	return random() % options->num_objects + 1;
+	//LHS env rules can only be 20%
+	int obj_segment=(options->num_objects-(options->num_objects*PI_OBJ));
+	int obj_offset=(options->num_objects*PI_OBJ);
+	return (random() % obj_segment)+obj_offset;
 }
 
 unsigned int PDP_Psystem_source_random::env_get_environment() {
@@ -361,8 +377,11 @@ unsigned int PDP_Psystem_source_random::env_loop_rhs() {
 bool PDP_Psystem_source_random::env_next_object(unsigned int & object, unsigned int & environment) {
 
 	if (Up_it<env_lengthU[rule_env_it]) {
+		//RHS for env rules can be any object
+		int obj_segment=options->num_objects;
+		int obj_offset=0;
 		Up_it++;
-		object=random() % options->num_objects;
+		object=(random() % obj_segment)+obj_offset;
 		environment=random() % options->num_environments;
 		return true;
 	}
