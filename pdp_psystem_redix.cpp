@@ -659,7 +659,7 @@ void PDP_Psystem_redix_out_std::print_rule_selection(int sim){
 
 				if (r<rpsize)
 					val=structures->nr[sim*(options->num_environments*rpsize+(resize-rpsize))+env*rpsize+r];
-				else
+				else if (env==GET_ENVIRONMENT(structures->ruleblock.membrane[block]))
 					val=structures->nr[sim*(options->num_environments*rpsize+(resize-rpsize))+options->num_environments*rpsize+(r-rpsize)];
 
 				cout << "R" << r-rule_ini << "[" << r << "]:(p=" << p << ",n=" << val <<"), ";

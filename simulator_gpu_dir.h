@@ -143,6 +143,10 @@ private:
 	uint large_blocks;
 	#define NUM_STREAMS 12
 	cudaStream_t streams[NUM_STREAMS];
+
+	//Compacting blocks
+	uint* d_sizes;
+	uint* d_active_blocks;
 	/*******************************/
 	/* Only for debugging purposes */
 
