@@ -147,6 +147,7 @@ private:
 	//Compacting blocks
 	uint* d_sizes;
 	uint* d_active_blocks;
+	uint* d_active_rules;
 	/*******************************/
 	/* Only for debugging purposes */
 

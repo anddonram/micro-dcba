@@ -128,7 +128,7 @@ static inline __device__ unsigned int curng_binomial_binv_fast(unsigned int n, f
         u = u - r;
         x++;
         r = (fdividef(a,((float)x)) - s) * r;
-	if (r<=0.0)
+	if (r<=0.0f)
 		break;
     }
     //Algorithm finishes here.
@@ -151,7 +151,7 @@ static inline __device__ unsigned int curng_binomial_norm(unsigned int n, float 
 
     float z = curand_normal(&localState);
     float mean = ((float)n)*p;
-    float stddev = sqrt(mean*(1.-p));
+    float stddev = sqrtf(mean*(1.f-p));
     x = (unsigned int)((z*stddev)+mean);
 
     if (x>n)
@@ -169,7 +169,7 @@ static inline __device__ unsigned int curng_binomial_random(unsigned int n, floa
 	k=0;
     else */
 
-    if (n*fmin(p,1.0f-p) < 10)
+    if (n*fminf(p,1.0f-p) < 10)
         k = curng_binomial_binv_fast(n,p);
     else{
         k = curng_binomial_norm(n,p);

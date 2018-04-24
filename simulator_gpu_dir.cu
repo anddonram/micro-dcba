@@ -296,6 +296,7 @@ bool Simulator_gpu_dir::init() {
 	if(!options->micro){
 		dep_mem+=options->num_environments*sizeof(uint);//d_sizes
 		dep_mem+=options->num_environments*besize*sizeof(uint);//d_active_blocks
+		dep_mem+=(options->num_environments*structures->pi_rule_size)*sizeof(uint);// d_active_rules
 	}
 	// Add new data structures depending on the number of simulations
 
@@ -561,6 +562,7 @@ bool Simulator_gpu_dir::init() {
 	if(!options->micro){
 		checkCudaErrors(cudaMalloc(&d_sizes,sim_parallel*options->num_environments*sizeof(uint)));
 		checkCudaErrors(cudaMalloc(&d_active_blocks,sim_parallel*options->num_environments*besize*sizeof(uint)));
+		checkCudaErrors(cudaMalloc(&d_active_rules,sim_parallel*(options->num_environments*structures->pi_rule_size)*sizeof(uint)));
 	}
 	// Allocate Additions
 	if (!accurate)
@@ -791,6 +793,7 @@ void Simulator_gpu_dir::del() {
 	}else{
 		checkCudaErrors(cudaFree(d_sizes));
 		checkCudaErrors(cudaFree(d_active_blocks));
+		checkCudaErrors(cudaFree(d_active_rules));
 	}
 	checkCudaErrors(cudaStreamDestroy(execution_stream));
 	checkCudaErrors(cudaStreamDestroy(copy_stream));
@@ -1584,7 +1587,7 @@ __global__ void kernel_phase1_update_v2(
 				uint mult=GET_MULTIPLICITY(membr);
 				membr=GET_MEMBR(membr);
 
-				// Check if we have enough objects to apply the block
+				// Check if we have enough objects to apply the block, otherwise deactivate it
 				if (configuration.multiset[sim*options.num_environments*esize+env*esize+membr*msize+obj]<mult) {
 					atomicAnd((d_abv+sim*options.num_environments*asize+
 									 env*asize+
@@ -2082,7 +2085,6 @@ __global__ void kernel_phase2_generic(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		__syncthreads();
 		
 		
-		//__syncthreads();
 		
 		// TODO: First solution (following KISS methodology): 
 		//       ThreadIdx.x==0 will update everything, and rest of threads will
@@ -2129,7 +2131,6 @@ __global__ void kernel_phase2_v2(PDP_Psystem_REDIX::Ruleblock ruleblock,
 	if(threadIdx.x==0){
 		s_next=0;
 	}
-	//__syncthreads();
 
 	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
 		__syncthreads();
@@ -2275,7 +2276,7 @@ __global__ void kernel_phase2_blhs(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		}
 		
 		__syncthreads();
-		
+
 		// If there are not active blocks in the chunk
 		if (next_b==0) continue;
 		
@@ -2807,7 +2808,6 @@ __global__ void kernel_phase3_reduce(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		uint* d_sizes,
 		uint *d_active_blocks) {
 
-	extern __shared__ uint sData[];
 	__shared__ uint next_b;
 
 	uint bdim = blockDim.x;
@@ -2829,7 +2829,6 @@ __global__ void kernel_phase3_reduce(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		if(block<besize){
 
 			if(nb[D_NB_IDX(block)]>0){
-
 				d_active_blocks[sim*options.num_environments*besize+env*besize+atomicInc(&next_b,UINT_MAX)]=block;
 			}
 		}
@@ -2846,8 +2845,12 @@ __global__ void kernel_phase3_compact(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::NR nr,
 		PDP_Psystem_REDIX::Probability probability,
 		uint* d_sizes,
-		uint *d_active_blocks
+		uint *d_active_blocks,
+		uint* d_active_rules
 		) {
+	__shared__ uint next_b;
+
+
 	volatile uint env=blockIdx.x;
 	volatile uint rpsize=d_computations.rpsize;
 	volatile uint resize=d_computations.resize;
@@ -2856,8 +2859,12 @@ __global__ void kernel_phase3_compact(PDP_Psystem_REDIX::Ruleblock ruleblock,
 	volatile uint block=threadIdx.x;
 	volatile uint besize=d_computations.besize;//options.num_blocks_env+options.num_rule_blocks;
 	uint active_size=d_sizes[sim*options.num_environments+env];
-	volatile uint block_chunks=(active_size + blockDim.x -1)>>CU_LOG_THREADS;
 
+	uint block_chunks=(active_size + blockDim.x -1)>>CU_LOG_THREADS;
+	if(threadIdx.x==0){
+		next_b=0;
+	}
+	__syncthreads();
 	for (int bchunk=0; bchunk < block_chunks; bchunk++) {
 
 		block=bchunk*blockDim.x+threadIdx.x;
@@ -2896,11 +2903,12 @@ __global__ void kernel_phase3_compact(PDP_Psystem_REDIX::Ruleblock ruleblock,
 				val=curng_binomial_random (N, cr);
 			}
 
-			if (!IS_ENVIRONMENT(membr))
+			if (!IS_ENVIRONMENT(membr)){
 				nr[D_NR_P_IDX(r)] = val;
-			else
+				d_active_rules[sim*options.num_environments*rpsize+env*rpsize+atomicInc(&next_b,UINT_MAX)]=r;
+			}else{
 				nr[D_NR_E_IDX(r)] = val;
-
+			}
 			N-=val;
 			d*=(1-cr);
 		}
@@ -2920,13 +2928,18 @@ __global__ void kernel_phase3_compact(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		if (cr > 0.0f) {
 			val=N;
 		}
-		if (!IS_ENVIRONMENT(membr))
+		if (!IS_ENVIRONMENT(membr)){
 			nr[D_NR_P_IDX(r)] = val;
-		else
+			d_active_rules[sim*options.num_environments*rpsize+env*rpsize+atomicInc(&next_b,UINT_MAX)]=r;
+		}else
 			nr[D_NR_E_IDX(r)] = val;
 		}
 		__syncthreads();
 
+	}
+	__syncthreads();
+	if(threadIdx.x==0){
+		d_sizes[sim*options.num_environments+env]=next_b;
 	}
 }
 
@@ -3214,7 +3227,8 @@ bool Simulator_gpu_dir::selection_phase3() {
 //							d_structures->nr,
 //							d_structures->probability,
 //							d_sizes,
-//							d_active_blocks
+//							d_active_blocks,
+//							d_active_rules
 //							);
 	kernel_phase3 <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->ruleblock,
 		d_structures->configuration, d_structures->nb,
@@ -3371,31 +3385,80 @@ __global__ void kernel_phase4 (PDP_Psystem_REDIX::Rule rule,
 	}
 
 	/* Communication rules, distributed among the environments */
-	uint reini=rpsize+env*re_chunk;
-	uint reend=rpsize+(env+1)*re_chunk;
-	uint it=0;
-	
-	r = reini+(it++)*blockDim.x+threadIdx.x;
-	
-	while ((r<resize) && (r<reend)) {
+	//Done in a kernel apart for keeping focus, besides both kernels can be run in parallel
+//	uint reini=rpsize+env*re_chunk;
+//	uint reend=rpsize+(env+1)*re_chunk;
+//	uint it=0;
+//
+//	r = reini+(it++)*blockDim.x+threadIdx.x;
+//
+//	while ((r<resize) && (r<reend)) {
+//		int o_ini=rule.rhs_idx[r];
+//		int o_end=rule.rhs_idx[r+1];
+//
+//		uint N=nr[D_NR_E_IDX(r)];
+//
+//		if (N>0){
+//
+//		for (int o=o_ini; o<o_end; o++) {
+//			uint obj=rhs.object[o];
+//			uint denv=rhs.mmultiplicity[o];
+//
+//			obj=sim*options.num_environments*esize+
+//				denv*esize+obj;
+//
+//			atomicAdd(&(configuration.multiset[obj]),N);
+//		}
+//		}
+//		r = reini+(it++)*blockDim.x+threadIdx.x;
+//	}
+}
+
+__global__ void kernel_phase4_compact (PDP_Psystem_REDIX::Rule rule,
+			PDP_Psystem_REDIX::Configuration configuration,
+			PDP_Psystem_REDIX::Rhs rhs,
+			PDP_Psystem_REDIX::NR nr,
+			uint rpsize,
+			uint resize,
+			uint re_chunk,
+			uint* d_sizes,
+			uint* active_rules) {
+	volatile _options options=d_options;
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint r=threadIdx.x;
+	uint esize=options.num_objects*options.num_membranes;
+	uint msize=options.num_objects;
+
+
+	uint active_size=d_sizes[sim*options.num_environments+env];
+
+	uint rule_chunks=(active_size + blockDim.x -1)>>CU_LOG_THREADS;
+
+	/* Rules of Pi, executed by each environment */
+	for (int rchunk=0; rchunk < rule_chunks; rchunk++) {
+		r=rchunk*blockDim.x+threadIdx.x;
+
+		if (r >= active_size) break;
+
+		r=active_rules[D_NR_P_IDX(r)];
+		uint N=nr[D_NR_P_IDX(r)];
+
 		int o_ini=rule.rhs_idx[r];
 		int o_end=rule.rhs_idx[r+1];
 
-		uint N=nr[D_NR_E_IDX(r)];
-
-		if (N>0)
 		for (int o=o_ini; o<o_end; o++) {
 			uint obj=rhs.object[o];
-			uint denv=rhs.mmultiplicity[o];
-			
-			obj=sim*options.num_environments*esize+
-				denv*esize+obj;
-			
-			atomicAdd(&(configuration.multiset[obj]),N);
+			uint mult=rhs.mmultiplicity[o];
+			uint membr=GET_MEMBR(mult);
+			mult=GET_MULTIPLICITY(mult);
+
+			atomicAdd(&(configuration.multiset[D_MU_IDX(obj,membr)]),N*mult);
 		}
-		r = reini+(it++)*blockDim.x+threadIdx.x;
+
 	}
 }
+
 __global__ void kernel_phase4_rules (PDP_Psystem_REDIX::Rule rule,
 			PDP_Psystem_REDIX::Configuration configuration,
 			PDP_Psystem_REDIX::Rhs rhs,
@@ -3467,7 +3530,8 @@ __global__ void kernel_phase4_env (PDP_Psystem_REDIX::Rule rule,
 
 		uint N=nr[D_NR_E_IDX(r)];
 
-		if (N>0)
+		if (N>0){
+
 		for (int o=o_ini; o<o_end; o++) {
 			uint obj=rhs.object[o];
 			uint denv=rhs.mmultiplicity[o];
@@ -3476,6 +3540,7 @@ __global__ void kernel_phase4_env (PDP_Psystem_REDIX::Rule rule,
 				denv*esize+obj;
 
 			atomicAdd(&(configuration.multiset[obj]),N);
+		}
 		}
 		r = reini+(it++)*blockDim.x+threadIdx.x;
 	}
@@ -3581,7 +3646,14 @@ int Simulator_gpu_dir::execution() {
 			d_structures->nr, d_structures->pi_rule_size,
 			d_structures->pi_rule_size+d_structures->env_rule_size,
 			re_chunk, *options);
-
+//		kernel_phase4_compact <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->rule,
+//					d_structures->configuration, d_structures->rhs,
+//					d_structures->nr, d_structures->pi_rule_size,
+//					d_structures->pi_rule_size+d_structures->env_rule_size,
+//					re_chunk, d_sizes,d_active_rules);
+		kernel_phase4_env <<<dimGrid,dimBlock,0,execution_stream>>> (d_structures->rule,
+							d_structures->configuration, d_structures->rhs,
+							d_structures->nr, re_chunk);
 	}
 
 	if (runcomp) {
