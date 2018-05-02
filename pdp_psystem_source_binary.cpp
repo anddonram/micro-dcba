@@ -724,7 +724,7 @@ bool PDP_Psystem_source_binary::read_filter() {
 		 }
 
 		//Say we have [0 1 1 0 0 1]
-		//We will transform this into [1 2 5]
+		//We will transform this into [1 2 5] (Inclusive scan)
 		//Copy the first part of the array and free the rest
 		unsigned int* filter_indexes=new unsigned int [options->objects_to_output];
 		int index=0;
