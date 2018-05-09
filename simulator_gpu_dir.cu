@@ -2221,9 +2221,9 @@ __global__ void kernel_phase2_blhs(PDP_Psystem_REDIX::Ruleblock ruleblock,
 		PDP_Psystem_REDIX::Lhs lhs,
 		PDP_Psystem_REDIX::NR nb,
 		PDP_Psystem_REDIX::NR nr,
-		struct _options options,
+	//	struct _options options,
 		uint * d_abv) {
-	
+	_options options=d_options;
 	extern __shared__ uint sData[];
 	__shared__ uint next_b,max_it;
 	
@@ -2410,15 +2410,7 @@ __global__ void kernel_phase2_blhs(PDP_Psystem_REDIX::Ruleblock ruleblock,
 				}
 			}
 		}
-		
-		//TODO: delete this, just for debuggin' purposes
-		//if (threadIdx.x==0 && block < besize)
-			//nr[sim*options.num_environments*besize+env*besize+block] = next_b;//s_blocks[threadIdx.x];
-			//nr[sim*options.num_environments*besize+env*besize+threadIdx.x+bchunk] = next_b;//s_blocks[threadIdx.x];
-		//if (threadIdx.x==2 && block < besize)
-			//nr[sim*options.num_environments*besize+env*besize+threadIdx.x+bchunk] = max_it;//s_blocks[threadIdx.x];
-		
-		//__syncthreads();
+
 	}
 }
 
@@ -2525,7 +2517,7 @@ bool Simulator_gpu_dir::selection_phase2(){
 
 			kernel_phase2_blhs <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
 				d_structures->configuration, d_structures->lhs, d_structures->nb,
-				d_structures->nr, *options, d_abv);
+				d_structures->nr, d_abv);
 
 
 		}
