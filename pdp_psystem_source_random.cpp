@@ -437,7 +437,10 @@ unsigned int PDP_Psystem_source_random::conf_loop_objects() {
 bool PDP_Psystem_source_random::conf_next_object(unsigned int & object, unsigned int & multiplicity) {
 	if (obj_it<options->num_objects) {
 		object=obj_it;
-		multiplicity=random()%100;
+		//If random number is greater than the value specified,
+		//the object will not be in the initial configuration
+		//E.g.: objects_init_config=0.8f, so 20% of objects won't be in the init config
+		multiplicity=random()<(options->objects_init_config*RAND_MAX)?random()%100:0;
 		obj_it++;
 		return true;
 	}

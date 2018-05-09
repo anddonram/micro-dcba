@@ -83,10 +83,12 @@ int main (int argc, char* argv[]) {
 	options->fast=false;
 	options->error_cycle=1;
 	options->micro=false;
+
+	options->objects_init_config=1.f;
 	//By default, errors are brought each the cycle of steps, along with the configuration data
 	bool error_with_common_cycle=true;
 	// TODO: use getopt_long function to support arguments of type "--blocks"
-	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:dE:i")) != -1) {
+	while ((c = getopt (argc, argv, "Rb:r:c:l:e:O:o:q:a:t:s:v:f:g:I:M:FX:h:w:dE:im:")) != -1) {
 		switch (c) {
 		/* For randomly generated system */
 		case 'R':
@@ -159,6 +161,14 @@ int main (int argc, char* argv[]) {
 		case 'M':
 			par=atoi(optarg);
 			break;
+		case 'm':
+			options->objects_init_config=atof(optarg);
+			if(options->objects_init_config>1.f){
+				options->objects_init_config=1.f;
+			}else if(options->objects_init_config<0.f){
+				options->objects_init_config=0.f;
+			}
+			break;
 		case 'F':
 			accu=false;
 			break;
@@ -209,6 +219,7 @@ int main (int argc, char* argv[]) {
 					" -r: maximum number of rules per block" << endl <<
 					" -l: maximum number of objects in the LHS/RHS" << endl <<
 					" -e: number of environments" << endl <<
+					" -m: proportion of objects appearing in the initial configuration(between 0.0 and 1.0)" << endl <<
 					" -X: select one of the prefixed examples: 0 (default: configured through parameters), 1 (small), 2 (medium), 3 (large)" << endl <<
 					"Finally, the simulator always outputs the total simulation time in ms and the total memory required in Bytes."<< endl;
 			return 0;

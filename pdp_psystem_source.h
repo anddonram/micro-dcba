@@ -74,6 +74,9 @@ struct _options{
 	int num_partitions;
 	int independent_ruleblocks;
 
+	//For random systems, how many of the objects will be present at the initial configuration
+	float objects_init_config;
+
 };
 struct _computations{
 	unsigned int besize;//=options.num_blocks_env+options.num_rule_blocks;
