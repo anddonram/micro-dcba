@@ -926,7 +926,149 @@ __device__ inline void d_deactivate(uint block, uint * abv) {
 }
 
 
+/*****************************************/
+/* Global phase for independent ruleblocks on the GPU */
+/*****************************************/
+__global__ void kernel_micro_dcba_independent(
+			PDP_Psystem_REDIX::Rule rule,
+			PDP_Psystem_REDIX::Ruleblock ruleblock,
+			PDP_Psystem_REDIX::Configuration configuration,
+			PDP_Psystem_REDIX::Lhs lhs,
+			PDP_Psystem_REDIX::Rhs rhs,
+			PDP_Psystem_REDIX::Probability probability,
+			uint * d_abv,
+			uint * d_data_error,
+			uint part_init,
+			uint part_end) {
+	struct _options options=d_options;
+	uint part_size=part_end-part_init;
 
+	uint bdim=blockDim.x;
+	uint env=blockIdx.x;
+	uint sim=blockIdx.y;
+	uint block=threadIdx.x;
+	uint besize=options.num_blocks_env+options.num_rule_blocks;
+	uint esize=options.num_objects*options.num_membranes;
+	uint msize=options.num_objects;
+	uint rpsize=d_computations.rpsize;
+	uint asize=(besize>>ABV_LOG_WORD_SIZE) + 1;
+	uint part_chunks=((part_size) + bdim - 1)>>CU_LOG_THREADS;
+
+	/* Minimum applications */
+	for (int bchunk=0; bchunk < part_chunks; bchunk++) {
+        uint min=0;
+
+		block=bchunk*blockDim.x+threadIdx.x+part_init;
+
+		uint o_init=ruleblock.lhs_idx[block];
+		uint o_end=ruleblock.lhs_idx[block+1];
+		uint rule_ini=ruleblock.rule_idx[block];
+		uint rule_end=ruleblock.rule_idx[block+1];
+
+		// If the block is active
+		if ((block < part_end) &&
+				((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
+									        >> ((~block)&ABV_DESPL_MASK))
+											& 0x1)) {
+			min=UINT_MAX;
+
+			for (int o=o_init; o < o_end; o++) {
+				uint obj=lhs.object[o];
+				uint membr=lhs.mmultiplicity[o];
+				uint mult=GET_MULTIPLICITY(membr);
+				membr=GET_MEMBR(membr);
+
+				uint value = configuration.multiset[D_MU_IDX(obj,membr)]/mult;
+				min=(value < min) ? value : min;
+				if(min==0) break;
+			}
+
+
+		}
+		uint N=min;
+		if (N>0) {
+			uint membr=ruleblock.membrane[block];
+
+			/* Consume LHS */
+			for (int o=o_init; o < o_end; o++) {
+				uint obj=lhs.object[o];
+				uint membr=lhs.mmultiplicity[o];
+				uint mult=GET_MULTIPLICITY(membr);
+				membr=GET_MEMBR(membr);
+
+				/* Delete block application and check errors */
+				if (atomicSub(configuration.multiset+sim*options.num_environments*esize+env*esize+membr*msize+obj,N*mult)
+					< N*mult)
+//					if (!update_error) update_error=true;
+//					block_upd_error = 1+block;
+					printf("error: %u %u %u %u\n",sim,env,block,N);
+			}
+
+			//Calculate multinomial and apply to rules
+			configuration.membrane[D_CH_IDX(GET_MEMBRANE(membr))]=GET_BETA(membr);
+
+			float cr=0.0f,d=1.0f;
+			uint r;
+			float p;
+			uint val=0;
+			//Only n-1 rules, to avoid branching on last
+			for (r = rule_ini; r < rule_end-1; r++) {
+				val=0;
+
+				p=probability[env*rpsize+r];
+
+
+				cr = fdividef(p,d);
+
+				if (cr > 0.0f) {
+					val=curng_binomial_random (N, cr);
+				}
+
+
+				int o_ini=rule.rhs_idx[r];
+				int o_end=rule.rhs_idx[r+1];
+
+				//Apply rule applications
+				for (int o=o_ini; o<o_end; o++) {
+					uint obj=rhs.object[o];
+					uint mult=rhs.mmultiplicity[o];
+					uint membr=GET_MEMBR(mult);
+					mult=GET_MULTIPLICITY(mult);
+
+					atomicAdd(&(configuration.multiset[D_MU_IDX(obj,membr)]),val*mult);
+				}
+				N-=val;
+				d*=(1-cr);
+			}
+
+			//Last rule, to avoid one branch on the loop
+			r=rule_end-1;
+			val=0;
+
+			p=probability[env*rpsize+r];
+
+			cr = fdividef(p,d);
+
+			if (cr > 0.0f) {
+				val=N;
+			}
+
+			int o_ini=rule.rhs_idx[r];
+			int o_end=rule.rhs_idx[r+1];
+
+			//Apply rule applications
+			for (int o=o_ini; o<o_end; o++) {
+				uint obj=rhs.object[o];
+				uint mult=rhs.mmultiplicity[o];
+				uint membr=GET_MEMBR(mult);
+				mult=GET_MULTIPLICITY(mult);
+
+				atomicAdd(&(configuration.multiset[D_MU_IDX(obj,membr)]),val*mult);
+			}
+		}
+	}
+
+}
 /*****************************************/
 /* Step 1 (filters) of phase1 on the GPU */
 /*****************************************/
@@ -3494,7 +3636,7 @@ __global__ void kernel_phase4_rules (PDP_Psystem_REDIX::Rule rule,
 	}
 
 }
-__global__ void kernel_phase4_env (PDP_Psystem_REDIX::Rule rule,
+__global__ void kernel_phase4_env(PDP_Psystem_REDIX::Rule rule,
 			PDP_Psystem_REDIX::Configuration configuration,
 			PDP_Psystem_REDIX::Rhs rhs,
 			PDP_Psystem_REDIX::NR nr,
