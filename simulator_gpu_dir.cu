@@ -937,7 +937,7 @@ __global__ void kernel_micro_dcba_independent(
 			PDP_Psystem_REDIX::Rhs rhs,
 			PDP_Psystem_REDIX::Probability probability,
 			uint * d_abv,
-			uint * d_data_error,
+		//	uint * d_data_error,
 			uint part_init,
 			uint part_end) {
 	struct _options options=d_options;
@@ -960,11 +960,14 @@ __global__ void kernel_micro_dcba_independent(
 
 		block=bchunk*blockDim.x+threadIdx.x+part_init;
 
-		uint o_init=ruleblock.lhs_idx[block];
-		uint o_end=ruleblock.lhs_idx[block+1];
-		uint rule_ini=ruleblock.rule_idx[block];
-		uint rule_end=ruleblock.rule_idx[block+1];
-
+		uint o_init=0;
+		uint o_end=0;
+		uint membr=0;
+		if (block < part_end){
+				o_init=ruleblock.lhs_idx[block];
+				o_end=ruleblock.lhs_idx[block+1];
+				membr=ruleblock.membrane[block];
+		}
 		// If the block is active
 		if ((block < part_end) &&
 				((d_abv[sim*options.num_environments*asize+env*asize+(block>>ABV_LOG_WORD_SIZE)]
@@ -985,9 +988,12 @@ __global__ void kernel_micro_dcba_independent(
 
 
 		}
-		uint N=min;
+		//In case its an env_rule, it should be in the proper environment
+		uint N=min*(env==GET_ENVIRONMENT(membr)&&IS_ENVIRONMENT(membr));
 		if (N>0) {
-			uint membr=ruleblock.membrane[block];
+
+			uint rule_ini=ruleblock.rule_idx[block];
+			uint rule_end=ruleblock.rule_idx[block+1];
 
 			/* Consume LHS */
 			for (int o=o_init; o < o_end; o++) {
@@ -1016,7 +1022,6 @@ __global__ void kernel_micro_dcba_independent(
 				val=0;
 
 				p=probability[env*rpsize+r];
-
 
 				cr = fdividef(p,d);
 
