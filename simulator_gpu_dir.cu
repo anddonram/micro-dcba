@@ -1088,12 +1088,12 @@ __global__ void kernel_phase1_filters(
 			PDP_Psystem_REDIX::Configuration configuration,
 			PDP_Psystem_REDIX::Lhs lhs,
 			PDP_Psystem_REDIX::NR nb,
-			struct _options options,
+		//	struct _options options,
 			uint * d_abv,
 			uint * d_data_error) {
-
-	uint env=blockIdx.x;
-	uint sim=blockIdx.y;
+	volatile _options options=d_options;
+	volatile uint env=blockIdx.x;
+	volatile uint sim=blockIdx.y;
 	uint block=threadIdx.x;
 	uint besize=options.num_blocks_env+options.num_rule_blocks;
 	uint esize=options.num_objects*options.num_membranes;
@@ -1200,7 +1200,6 @@ __global__ void kernel_phase1_filters(
 		if (threadIdx.x==0)// && d_data_error[0]!=CONSISTENCY_ERROR)
 			d_data_error[0]=CONSISTENCY_ERROR;
 	}
-	//__syncthreads();
 }
 
 /******************************************************************************************************/
@@ -1794,7 +1793,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 	}
 
 	kernel_phase1_filters <<<dimGrid,dimBlock,sh_mem,execution_stream>>> (d_structures->ruleblock,
-			d_structures->configuration, d_structures->lhs, d_structures->nb, *options,
+			d_structures->configuration, d_structures->lhs, d_structures->nb,
 			d_abv, d_data_error);
 
 
