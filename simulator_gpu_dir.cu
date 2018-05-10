@@ -1022,7 +1022,13 @@ __global__ void kernel_micro_dcba_independent(
 			for (r = rule_ini; r < rule_end-1; r++) {
 				val=0;
 
-				p=probability[env*rpsize+r];
+				if (IS_ENVIRONMENT(membr)) {
+					p=probability[options.num_environments*rpsize+(r-rpsize)];
+				}
+				else {
+					p=probability[env*rpsize+r];
+				}
+
 
 				cr = fdividef(p,d);
 
@@ -1051,7 +1057,13 @@ __global__ void kernel_micro_dcba_independent(
 			r=rule_end-1;
 			val=0;
 
-			p=probability[env*rpsize+r];
+			if (IS_ENVIRONMENT(membr)) {
+				p=probability[options.num_environments*rpsize+(r-rpsize)];
+			}
+			else {
+				p=probability[env*rpsize+r];
+			}
+
 
 			cr = fdividef(p,d);
 
