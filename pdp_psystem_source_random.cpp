@@ -34,7 +34,7 @@
 using namespace std;
 
 #define MAX_MULTIPLICITY 5
-#define PI_OBJ 0.8
+#define PI_OBJ 0.75
 /* Random generator of a PDP P System: maravillosos procedures */
 PDP_Psystem_source_random::PDP_Psystem_source_random(Options options) {
 	this->options=options;
@@ -62,6 +62,8 @@ PDP_Psystem_source_random::~PDP_Psystem_source_random() {
 	delete []env_lengthU;
 	delete []lengthUp;
 	delete []lengthVp;
+	delete []env_env;
+	delete []env_obj;
 }
 
 bool PDP_Psystem_source_random::start() {
@@ -73,6 +75,11 @@ bool PDP_Psystem_source_random::start() {
 		mutree[i]=random()%(i) +1;
 		//cout<<"membrane "<< i+1<< " has parent:" <<mutree[i]<< endl;
 	}
+
+	//
+	env_env= new uint[options->num_blocks_env];
+	env_obj= new uint[options->num_blocks_env];
+
 	lengthU= new short int[options->num_rule_blocks];
 	for (int i=0;i<options->num_rule_blocks;i++)
 		lengthU[i]=0;
@@ -322,14 +329,31 @@ bool PDP_Psystem_source_random::env_next_rule_block() {
 }
 
 unsigned int PDP_Psystem_source_random::env_get_object_lhs() {
-	//LHS env rules can only be 20%
-	int obj_segment=(options->num_objects-(options->num_objects*PI_OBJ));
-	int obj_offset=(options->num_objects*PI_OBJ);
-	return (random() % obj_segment)+obj_offset;
+	return env_obj[block_env_it];
 }
 
 unsigned int PDP_Psystem_source_random::env_get_environment() {
-	return random() % options->num_environments;
+	//LHS env rules can only be 25%
+	int obj_segment=(options->num_objects-(options->num_objects*PI_OBJ));
+	int obj_offset=(options->num_objects*PI_OBJ);
+
+	uint next_object=(random() % obj_segment)+obj_offset;
+	uint next_env=random() % options->num_environments;
+	bool rep=false;
+	do{
+		rep=false;
+		for (int i=0;i<block_env_it;i++){
+			if(env_obj[i]==next_object && env_env[i]==next_env) {
+					rep=true;
+					next_object=(random() % obj_segment)+obj_offset;
+					next_env=random() % options->num_environments;
+			}
+		}
+	}while(rep);
+
+	env_obj[block_env_it]=next_object;
+	env_env[block_env_it]=next_env;
+	return next_env;
 }
 
 unsigned int PDP_Psystem_source_random::env_loop_rules() {

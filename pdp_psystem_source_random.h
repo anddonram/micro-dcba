@@ -75,6 +75,8 @@ private:
 	unsigned int memb_it;
 	unsigned int obj_it;
 
+	unsigned int* env_env;
+	unsigned int* env_obj;
 public:
 	bool start();
 	unsigned int pi_loop_rule_blocks();
