@@ -994,6 +994,7 @@ __global__ void kernel_micro_dcba_independent(
 
 		//In case its an env_rule, it should be in the proper environment
 		N=N*(!IS_ENVIRONMENT(membr)||env==GET_ENVIRONMENT(membr));
+
 		if (N==0) {
 			if(block<besize)
 				for (uint r = rule_ini; r < rule_end; r++) {
@@ -1796,20 +1797,7 @@ bool Simulator_gpu_dir::selection_phase1() {
 			d_structures->configuration, d_structures->lhs, d_structures->nb, *options,
 			d_abv, d_data_error);
 
-	if(options->micro){
-		uint start=accum_offset[options->num_partitions];
-		kernel_micro_dcba_independent<<<dimGrid,dimBlock,0,execution_stream>>>(
-				d_structures->rule,
-				d_structures->ruleblock,
-				d_structures->configuration,
-				d_structures->lhs,
-				d_structures->rhs,
-				d_structures->probability,
-				d_abv,
-				d_structures->nr,
-			//	d_data_error,
-				start);
-	}
+
 
 	if (runcomp) {
 		cudaStreamSynchronize(execution_stream);
@@ -3209,6 +3197,18 @@ bool Simulator_gpu_dir::selection_phase3() {
 //				d_structures->configuration, d_structures->nb,
 //				d_structures->nr, d_structures->probability
 //				);
+		uint start=accum_offset[options->num_partitions];
+		kernel_micro_dcba_independent<<<dimGrid,dimBlock,0,execution_stream>>>(
+				d_structures->rule,
+				d_structures->ruleblock,
+				d_structures->configuration,
+				d_structures->lhs,
+				d_structures->rhs,
+				d_structures->probability,
+				d_abv,
+				d_structures->nr,
+			//	d_data_error,
+				start);
 
 		for(int i=0;i<NUM_STREAMS;i++){
 			cudaStreamSynchronize(streams[i]);
