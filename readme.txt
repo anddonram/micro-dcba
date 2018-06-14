@@ -2,6 +2,9 @@ readme.txt: This file explains the code and the structure of the algorithm.
 
 Version 1.0 beta
 
+Authors: Andrés Doncel Ramírez and M.A. Martínez-del-Amor
+
+New features: simulator updated to CUDA 9.1, introduced kernel-data transfer overlapping, faster start and a new implementation achieving up to 1.5x vs the original GPU version (and up to 10x vs the CPU version).
 
 I. Motivation
 
