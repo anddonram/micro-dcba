@@ -3,7 +3,7 @@
     ABCD-GPU is a subproject of PMCGPU (Parallel simulators for Membrane 
                                         Computing on the GPU)   
  
-    Copyright (c) 2015  Research Group on Natural Computing, Universidad de Sevilla
+    Copyright (c) 2018  Research Group on Natural Computing, Universidad de Sevilla
     					Dpto. Ciencias de la Computación e Inteligencia Artificial
     					Escuela Técnica Superior de Ingeniería Informática,
     					Avda. Reina Mercedes s/n, 41012 Sevilla (Spain)
