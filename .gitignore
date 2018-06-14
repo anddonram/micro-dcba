@@ -42,3 +42,9 @@
 .project
 
 abcdgpu
+
+*.sh
+*.png
+
+#Folders for graphics
+

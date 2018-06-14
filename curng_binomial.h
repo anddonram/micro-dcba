@@ -96,6 +96,7 @@ static inline __device__ unsigned int curng_binomial_binv(unsigned int n, float 
     double a = (n+1)*s;
     double r = powf(q,n);        //Pow floating points
     float u = curand_uniform(&localState);
+//TODO:if r==0, this can cause huge deviations. Fix this
     while(u > r){
         u = u - r;
         x++;

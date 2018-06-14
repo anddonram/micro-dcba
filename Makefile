@@ -4,12 +4,12 @@
 #    ABCD-GPU is a subproject of PMCGPU (Parallel simulators for Membrane 
 #                                        Computing on the GPU)   
 # 
-#    Copyright (c) 2015  Research Group on Natural Computing, Universidad de Sevilla
+#    Copyright (c) 2018  Research Group on Natural Computing, Universidad de Sevilla
 #    					 Dpto. Ciencias de la Computación e Inteligencia Artificial
 #    					 Escuela Técnica Superior de Ingeniería Informática,
 #    					 Avda. Reina Mercedes s/n, 41012 Sevilla (Spain)
 #
-#    Author: Miguel Ángel Martínez-del-Amor
+#    Authors: Andrés Doncel Ramírez and Miguel Ángel Martínez-del-Amor
 #    
 #    This file is part of ABCD-GPU.
 #  
@@ -33,7 +33,7 @@
 #
 # Requirements of your system:
 # - A Linux based distribution (only Ubuntu has been tested)
-# - A CUDA installation, from version 5.5, including: 
+# - A CUDA installation, from version 9.1, including: 
 #      * NVIDIA toolkit, its associated libraries, and the nvcc compiler.
 #      * Configure LD_LIBRARY_PATH to contain the CUDA lib(64) folder, e.g. 
 #          in .bashrc, add "export LD_LIBRARY_PATH=/usr/local/cuda/lib"
@@ -48,7 +48,7 @@
 
 ################################################################################
 #
-# This version is based on CUDA SDK examples (from 5.5 to 6.5), and uses the
+# This version is based on CUDA SDK examples (from 9.1), and uses the
 # libraries already defined there. First download and install CUDA and the
 # SDK, then copy the source code inside the examples, e.g. inside the folder
 # "NVIDIA_CUDA-X.Y_Samples/8_pmcgpu/abcdgpu". You must agree with the NVIDIA
