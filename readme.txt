@@ -100,4 +100,11 @@ V. Acknowledgements
 
 The authors acknowledge the support of the projects TIN2012-37434 of the "Ministerio de Economía y Competitividad" of Spain, co-financed by FEDER funds, and "proyecto de excelencia con Investigador de Reconocida Valía" P08-TIC04200 of the "Junta de Andalucía". They also acknowledge the CUDA Research Center program, granted by NVIDIA to the University of Seville in 2014 and 2015, and their donation of a Tesla K40 GPU. M.A. Martínez-del-Amor also acknowledges the support of the 3rd Postdoctoral phase of the PIF program of project P08-TIC04200.
 
+
+VI. Known issues
+
+- float-precision bug when calculating multinomial distribution on cuRNG. Occurs when rules in a ruleblock have very unbalanced probabilities (e.g. 90% vs 10%).
+
+- when comparing GPU vs CPU, if num_simulations>num_parallel_simulations, time counters are reset instead of added. This results in only the last simulations being profiled, outputting wrong results.
+
 /*$Id: readme.txt 2015-07-19 20:38:45 mdelamor $*/

@@ -57,7 +57,7 @@
 ################################################################################
 
 # Provide the absolute path to your CUDA installation
-CUDA_PATH:= /usr/local/cuda-9.1
+CUDA_PATH:= /usr/local/cuda
 
 # GNU g++ compiler is required
 GCC := g++ -std=c++11 
